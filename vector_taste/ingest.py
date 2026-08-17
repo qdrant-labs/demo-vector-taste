@@ -7,6 +7,7 @@ and a saved taste profile referencing a point ID stays valid across a rebuild.
 
 from __future__ import annotations
 
+import time
 import uuid
 from pathlib import Path
 
@@ -36,8 +37,15 @@ def _segments(wav: np.ndarray, sr: int) -> list[tuple[int, np.ndarray]]:
     return [(i, s) for i, s in out if len(s) >= CHUNK_SEC * sr] or out[:1]
 
 
-def ingest_tracks(rows: list[dict], analyze_audio: bool = True) -> dict:
-    """Embed and upsert. Returns counts plus the rows actually ingested."""
+def ingest_tracks(
+    rows: list[dict], analyze_audio: bool = True, flush_every: int = 50
+) -> dict:
+    """Embed and upsert. Returns counts plus the rows actually ingested.
+
+    Upserts every `flush_every` tracks rather than once at the end: a thousand-track run is
+    long enough that an interruption should not throw away all the work, and point IDs are
+    deterministic so resuming re-writes the same points instead of duplicating them.
+    """
     from .config import SAMPLE_RATE
     from .embed import chunk_audio
 
@@ -45,9 +53,18 @@ def ingest_tracks(rows: list[dict], analyze_audio: bool = True) -> dict:
 
     points, ingested = [], []
     skipped_missing = 0
+    total_points = 0
     vectors_for_disk: list[np.ndarray] = []
+    t0 = time.perf_counter()
 
-    for row in rows:
+    def flush():
+        nonlocal points, total_points
+        if points:
+            store.upsert_points(points)
+            total_points += len(points)
+            points = []
+
+    for n, row in enumerate(rows, 1):
         path = corpus.fma_audio_path(row["track_id"])
         if not path.exists():
             skipped_missing += 1
@@ -121,7 +138,19 @@ def ingest_tracks(rows: list[dict], analyze_audio: bool = True) -> dict:
                 vectors_for_disk.append(vec)
         ingested.append(row)
 
-    store.upsert_points(points)
+        if n % flush_every == 0:
+            flush()
+            rate = n / max(time.perf_counter() - t0, 1e-6)
+            eta = (len(rows) - n) / rate if rate else 0
+            print(
+                f"\r  {n}/{len(rows)} tracks  {total_points} points  "
+                f"{rate:.1f}/s  eta {eta / 60:.1f}m",
+                end="",
+                flush=True,
+            )
+
+    flush()
+    print()
 
     if vectors_for_disk:
         DATA.mkdir(parents=True, exist_ok=True)
@@ -129,7 +158,7 @@ def ingest_tracks(rows: list[dict], analyze_audio: bool = True) -> dict:
 
     return {
         "tracks": len(ingested),
-        "points": len(points),
+        "points": total_points,
         "skipped_missing_audio": skipped_missing,
         "rows": ingested,
     }
