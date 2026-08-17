@@ -232,6 +232,15 @@ def cmd_loop(args):
 
 
 # ------------------------------------------------------------------------------ utilities
+def cmd_demo_profiles(args):
+    from .demo import build_demo_profiles
+
+    _p("")
+    profiles = build_demo_profiles()
+    _p(f"\n  {len(profiles)} demo profile(s) saved. Next: uv run vt bake")
+    return 0
+
+
 def cmd_timings(args):
     from .timing import summary
 
@@ -357,6 +366,9 @@ def main(argv=None) -> int:
     lp.add_argument("--no-upsert", action="store_true")
     lp.set_defaults(func=cmd_loop)
 
+    sub.add_parser(
+        "demo-profiles", help="build the scripted demo taste profiles"
+    ).set_defaults(func=cmd_demo_profiles)
     sub.add_parser("timings", help="per-stage wall clock").set_defaults(func=cmd_timings)
     sub.add_parser("info", help="collection status").set_defaults(func=cmd_info)
 
