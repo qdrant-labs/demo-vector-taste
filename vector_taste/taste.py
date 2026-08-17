@@ -25,7 +25,7 @@ from qdrant_client import models
 
 from .config import COLLECTION, DATA, get_client
 from .embed import centroid as _centroid
-from .search import EXACT, NOT_GENERATED, Hit, _to_hits, fetch_vectors
+from .search import EXACT, NOT_GENERATED, OVERFETCH, Hit, _to_hits, fetch_vectors, merge_filters
 
 # best_score: a group scores as max(similarity to any positive), with negatives squared and
 # negated when they win. Chosen over average_vector because a single added negative visibly
@@ -91,14 +91,6 @@ def recommend(
     if profile.is_empty():
         raise ValueError("taste profile has no examples")
 
-    query_filter = NOT_GENERATED
-    if flt is not None:
-        query_filter = models.Filter(
-            must=(flt.must or []) + (NOT_GENERATED.must or []),
-            must_not=(flt.must_not or []) + (NOT_GENERATED.must_not or []),
-            should=flt.should,
-        )
-
     res = get_client().query_points_groups(
         collection_name=COLLECTION,
         query=models.RecommendQuery(
@@ -110,13 +102,13 @@ def recommend(
         ),
         using="audio",
         group_by="segment_id",
-        limit=limit,
+        limit=limit * OVERFETCH,
         group_size=3,
-        query_filter=query_filter,
+        query_filter=merge_filters(flt),
         search_params=EXACT,
         with_payload=True,
     )
-    return _to_hits(res.groups)
+    return _to_hits(res.groups)[:limit]
 
 
 def discover(target: str, context: list[tuple[str, str]], limit: int = 10) -> list[Hit]:
@@ -135,13 +127,13 @@ def discover(target: str, context: list[tuple[str, str]], limit: int = 10) -> li
         ),
         using="audio",
         group_by="segment_id",
-        limit=limit,
+        limit=limit * OVERFETCH,
         group_size=3,
         query_filter=NOT_GENERATED,
         search_params=EXACT,
         with_payload=True,
     )
-    return _to_hits(res.groups)
+    return _to_hits(res.groups)[:limit]
 
 
 def taste_centroid(profile: TasteProfile) -> np.ndarray:

@@ -50,8 +50,18 @@ class Hit:
         return f"{p.get('artist', '?')} — {p.get('title', '?')}"
 
 
-def _to_hits(groups) -> list[Hit]:
-    """Group -> Hit, with a deterministic tie-break.
+# Cap on results from any one artist.
+#
+# Without this the top 10 is routinely 8 tracks by the same artist — which is a *correct*
+# nearest-neighbour result, since one artist's catalogue really does share production,
+# instrumentation and mix, but it reads as a bug on screen and it hides what a negative
+# example actually did. Artist diversification is standard practice in music retrieval.
+# Set max_per_artist=None to see the raw ranking.
+MAX_PER_ARTIST = 2
+
+
+def _to_hits(groups, max_per_artist: int | None = MAX_PER_ARTIST) -> list[Hit]:
+    """Group -> Hit, deterministically ordered, optionally diversified by artist.
 
     Qdrant's ScoredPoint ordering compares score only, with no point-id tie-break, so
     equal-scored results can reorder between restarts depending on segment layout. Sorting
@@ -72,25 +82,47 @@ def _to_hits(groups) -> list[Hit]:
                 n_chunks=len(g.hits),
             )
         )
-    return sorted(hits, key=lambda h: (-h.score, h.segment_id))
+    hits.sort(key=lambda h: (-h.score, h.segment_id))
+
+    if max_per_artist is None:
+        return hits
+
+    seen: dict[str, int] = {}
+    kept = []
+    for h in hits:
+        artist = (h.payload.get("artist") or "?").strip().lower()
+        if seen.get(artist, 0) >= max_per_artist:
+            continue
+        seen[artist] = seen.get(artist, 0) + 1
+        kept.append(h)
+    return kept
+
+
+# Over-fetch before the per-artist cap, or a catalogue-heavy artist eats the whole page and
+# we return 3 results when 10 were asked for.
+OVERFETCH = 6
+
+
+def merge_filters(extra: models.Filter | None) -> models.Filter:
+    """Always AND the caller's filter with the generated-points exclusion."""
+    if extra is None:
+        return NOT_GENERATED
+    return models.Filter(
+        must=(extra.must or []) + (NOT_GENERATED.must or []),
+        must_not=(extra.must_not or []) + (NOT_GENERATED.must_not or []),
+        should=extra.should,
+    )
 
 
 def _query(query, using: str, limit: int, extra_filter: models.Filter | None = None):
-    flt = NOT_GENERATED
-    if extra_filter is not None:
-        flt = models.Filter(
-            must=(extra_filter.must or []) + (NOT_GENERATED.must or []),
-            must_not=(extra_filter.must_not or []) + (NOT_GENERATED.must_not or []),
-            should=extra_filter.should,
-        )
     return get_client().query_points_groups(
         collection_name=COLLECTION,
         query=query,
         using=using,
         group_by="segment_id",
-        limit=limit,
+        limit=limit * OVERFETCH,
         group_size=3,  # a 30s segment holds at most three 10s chunks
-        query_filter=flt,
+        query_filter=merge_filters(extra_filter),
         search_params=EXACT,
         with_payload=True,
     )
@@ -104,7 +136,7 @@ def by_text(text: str, limit: int = 10, flt: models.Filter | None = None) -> lis
     would only compare the query to our own captions, which is ordinary keyword search
     wearing a costume.
     """
-    return _to_hits(_query(embed_text(text)[0].tolist(), "audio", limit, flt).groups)
+    return _to_hits(_query(embed_text(text)[0].tolist(), "audio", limit, flt).groups)[:limit]
 
 
 def by_audio(path, limit: int = 10, flt: models.Filter | None = None) -> list[Hit]:
@@ -112,7 +144,7 @@ def by_audio(path, limit: int = 10, flt: models.Filter | None = None) -> list[Hi
     vecs = embed_audio_file(path)
     if not len(vecs):
         return []
-    return _to_hits(_query(vecs[0].tolist(), "audio", limit, flt).groups)
+    return _to_hits(_query(vecs[0].tolist(), "audio", limit, flt).groups)[:limit]
 
 
 def combined(
@@ -133,7 +165,7 @@ def combined(
     norm = np.linalg.norm(mix)
     if norm == 0:
         return by_text(text, limit, flt)
-    return _to_hits(_query((mix / norm).tolist(), "audio", limit, flt).groups)
+    return _to_hits(_query((mix / norm).tolist(), "audio", limit, flt).groups)[:limit]
 
 
 def fetch_vectors(point_ids: list[str]) -> dict[str, np.ndarray]:
