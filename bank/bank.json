@@ -1,0 +1,11 @@
+{
+  "b07e5152536a": {
+    "backend": "local",
+    "bpm": 112,
+    "duration": 30.0,
+    "file": "b07e5152536a.wav",
+    "keyscale": "G major",
+    "prompt": "warm acoustic guitar, intimate and sparse, with acoustic folk, instrumental, guitar-driven rock, around 112 BPM, instrumental, no vocals",
+    "seed": 42
+  }
+}

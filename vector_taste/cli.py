@@ -207,8 +207,10 @@ def _reference_clip(hit) -> Path | None:
 
 
 def cmd_bake(args):
-    from .bake import bake_bank
+    from .bake import bake_bank, import_bank
 
+    if args.import_from:
+        return 0 if import_bank(Path(args.import_from)) else 1
     bake_bank(profiles=args.profile, backend=args.backend, duration=args.duration)
     return 0
 
@@ -357,6 +359,11 @@ def main(argv=None) -> int:
     bk.add_argument("--profile", action="append")
     bk.add_argument("--backend", default="local")
     bk.add_argument("--duration", type=float, default=30.0)
+    bk.add_argument(
+        "--import-from",
+        metavar="DIR",
+        help="adopt <profile_hash>.wav files baked on another machine",
+    )
     bk.set_defaults(func=cmd_bake)
 
     lp = sub.add_parser("loop", help="re-embed the generated track and score it")

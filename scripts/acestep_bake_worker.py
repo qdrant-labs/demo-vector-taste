@@ -84,14 +84,28 @@ def main(argv: list[str]) -> int:
                 duration=float(job.get("duration", 30.0)),
                 inference_steps=int(job.get("inference_steps", 8)),
                 seed=int(job.get("seed", 42)),
-                task_type="cover" if job.get("reference_audio") else "text2music",
+                # text2music, NOT cover, even with a style reference.
+                #
+                #   reference_audio -> timbre/style conditioning, works with text2music
+                #   src_audio       -> the track being re-recorded; what `cover` requires
+                #
+                # Passing task_type="cover" with only reference_audio fails immediately with
+                # "Task 'cover' requires source audio". We want new music in the style of a
+                # retrieved neighbour, not a cover version of it.
+                task_type="text2music",
                 reference_audio=job.get("reference_audio"),
                 audio_cover_strength=float(job.get("audio_cover_strength", 0.7)),
             )
             result = generate_music(dit, llm, params, GenerationConfig(batch_size=1))
             audios = getattr(result, "audios", None) or []
             if not audios:
-                raise RuntimeError("generate_music returned no audio")
+                # GenerationResult carries the real reason in .error / .status_message.
+                # Reporting only "no audio" throws away the one useful diagnostic.
+                raise RuntimeError(
+                    f"no audio (success={getattr(result, 'success', '?')}) "
+                    f"error={getattr(result, 'error', None)!r} "
+                    f"status={getattr(result, 'status_message', '')!r}"
+                )
 
             src = audios[0].get("path") if isinstance(audios[0], dict) else None
             if src and Path(src).exists():
