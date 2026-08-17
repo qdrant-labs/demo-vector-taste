@@ -42,3 +42,17 @@ venv/
 # Live generations: one file per take, regenerated on demand. The curated bank/ is
 # committed; these are not.
 generated/
+
+# Taste profiles are written on every compose while exploring, so ignore them by
+# default and track ONLY the scripted demo set that `vt bake` and bank/ depend on.
+data/taste_*.json
+data/prompt_*.json
+!data/taste_lofi.json
+!data/taste_electronic.json
+!data/taste_acoustic.json
+!data/taste_2a5559afa725.json
+!data/prompt_2a5559afa725.json
+!data/taste_b07e5152536a.json
+!data/prompt_b07e5152536a.json
+!data/taste_dc0369f4a0ee.json
+!data/prompt_dc0369f4a0ee.json

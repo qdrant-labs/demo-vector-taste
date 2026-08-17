@@ -82,6 +82,11 @@
 
 * { box-sizing: border-box; }
 
+/* The `hidden` attribute only sets `display: none` from the UA stylesheet, so any author
+   rule with an explicit display (`.acts`, `.progress` are both flex) silently defeats it.
+   This makes hidden actually mean hidden. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0 auto;
   max-width: var(--maxw);
@@ -252,6 +257,49 @@ button.primary kbd {
   padding: 0 0 0 4px; font-size: 1.1em; line-height: 1;
 }
 .acts { display: flex; gap: var(--s1); }
+
+/* ------------------------------------------------------------------ progress ring */
+/* A ring, not a bar: `.bar` already means score/percentile in the Composed panel, and
+   putting two meanings on one visual is worse than introducing a second shape. */
+.progress { display: flex; align-items: center; gap: var(--s3); padding: var(--s1) 0; }
+.ring { width: 84px; height: 84px; flex: none; transform: rotate(-90deg); }
+.ring circle {
+  fill: none;
+  stroke-width: 10;
+  stroke-linecap: round;
+}
+.ring-track { stroke: var(--line); }
+.ring-fill {
+  stroke: var(--accent);
+  /* 2πr for r=52. stroke-dashoffset is set from JS as (1 - frac) * this. */
+  stroke-dasharray: 326.7;
+  stroke-dashoffset: 326.7;
+  transition: stroke-dashoffset 0.4s ease;
+}
+.progress-pct {
+  font: 600 var(--fs-lg) var(--font-mono);
+  letter-spacing: -0.5px;
+  line-height: 1.1;
+}
+.progress-phase { font-size: 0.95em; }
+.progress-note { font: 400 0.8em var(--font-mono); margin-top: 2px; }
+
+/* Indeterminate: only while the model is still loading, which reports no progress at all.
+   Spinning a ring that cannot advance would imply measurement we do not have. */
+.progress.indeterminate .ring-fill {
+  stroke-dasharray: 82 245;
+  stroke-dashoffset: 0;
+  animation: ring-spin 1.4s linear infinite;
+  transition: none;
+}
+@keyframes ring-spin { to { transform: rotate(360deg); } }
+.progress.indeterminate .ring { transform: rotate(-90deg); }
+.progress.indeterminate .ring-fill { transform-origin: 60px 60px; }
+
+@media (prefers-reduced-motion: reduce) {
+  /* The fill still moves -- it is information. Only the spin is decoration. */
+  .progress.indeterminate .ring-fill { animation: none; stroke-dasharray: 163 163; }
+}
 
 /* -------------------------------------------------------------------------- results */
 .results { display: flex; flex-direction: column; gap: var(--s1); }

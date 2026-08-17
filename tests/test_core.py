@@ -351,3 +351,56 @@ def test_audio_for_profile_prefers_live_over_bank(tmp_path, monkeypatch):
     path, note = gen.audio_for_profile("abc123", None)
     assert path.name == "abc123-999.wav"
     assert note == ""
+
+
+# ------------------------------------------------------------------- progress reporting
+def test_parses_real_diffusion_tqdm_lines():
+    """Captured verbatim from a real run. tqdm's format is not an API, so pin it."""
+    from vector_taste.worker import parse_diffusion_step
+
+    assert parse_diffusion_step(
+        "MLX DiT diffusion:   0%|          | 0/8 [00:00<?, ?it/s]") == (0, 8)
+    assert parse_diffusion_step(
+        "MLX DiT diffusion:  25%|##5       | 2/8 [01:02<02:49, 28.23s/it]") == (2, 8)
+    assert parse_diffusion_step(
+        "MLX DiT diffusion: 100%|##########| 8/8 [01:09<00:00,  8.64s/it]") == (8, 8)
+
+
+def test_ignores_non_diffusion_output():
+    """ACE-Step's stderr is mostly loguru and torch warnings."""
+    from vector_taste.worker import parse_diffusion_step
+
+    for line in ("", "INFO | loading vae to mps (RSS: 2832 MB)",
+                 "bitsandbytes not installed", "Decoding audio..."):
+        assert parse_diffusion_step(line) is None
+
+
+def test_fraction_mapping_is_monotonic_and_starts_at_zero():
+    """ACE-Step's own scale starts at 0.51 for us -- shown raw the bar begins half done."""
+    from vector_taste.worker import map_fraction
+
+    fracs = [map_fraction(v)[0] for v in (0.0, 0.51, 0.52, 0.80, 0.99)]
+    assert fracs == sorted(fracs)
+    assert fracs[0] == 0.0
+    assert map_fraction(0.52)[1] == "diffusion"
+    assert map_fraction(0.80)[1] == "decoding audio"
+
+
+def test_progress_never_goes_backwards():
+    """tqdm and the callback interleave; a late lower value would look like a stall."""
+    from vector_taste.worker import Progress
+
+    p = Progress()
+    p.update(frac=0.5)
+    p.update(frac=0.2)                      # stale event arriving late
+    assert p.snapshot()["frac"] == 0.5
+    p.update(frac=0.7)
+    assert p.snapshot()["frac"] == 0.7
+
+
+def test_progress_snapshot_reports_elapsed():
+    from vector_taste.worker import Progress
+
+    snap = Progress().snapshot()
+    assert snap["elapsed"] >= 0
+    assert "started" not in snap          # internal, not part of the API

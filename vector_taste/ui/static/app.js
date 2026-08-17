@@ -295,27 +295,52 @@ async function refreshTaste() {
   } catch (e) { toast("taste failed: " + e.message); }
 }
 
-/* Compose now really generates (~2 min on an M4), so a silent spinner would read as a
-   hang. Show elapsed time and say how long it should take. */
+/* Compose really generates (~100-140s on an M4), so a silent spinner would read as a hang.
+   The ring is driven by the server's actual progress, not by elapsed time. */
+const RING_CIRCUMFERENCE = 326.7;          // 2πr for r=52, matches the CSS dasharray
 let composeTimer = null;
-function startComposeProgress() {
-  const btn = $("#gen");
-  const t0 = Date.now();
-  btn.disabled = true;
-  const tick = () => {
-    const s = Math.round((Date.now() - t0) / 1000);
-    btn.textContent = `composing… ${s}s`;
-  };
-  tick();
-  composeTimer = setInterval(tick, 1000);
-  toast("composing a new track — about 2 minutes on this machine", 8000);
+
+function renderProgress(p) {
+  const box = $("#progress");
+  // The model load reports nothing at all, so that phase is honestly indeterminate.
+  const indeterminate = p.worker === "warming" || p.phase === "loading model";
+  box.classList.toggle("indeterminate", indeterminate);
+
+  const frac = Math.max(0, Math.min(1, p.frac || 0));
+  $("#ringfill").style.strokeDashoffset = indeterminate
+    ? 0
+    : RING_CIRCUMFERENCE * (1 - frac);
+  $("#progpct").textContent = indeterminate ? "…" : `${Math.round(frac * 100)}%`;
+  $("#progphase").textContent = indeterminate
+    ? "loading model (first run)"
+    : (p.desc || p.phase || "working");
+  $("#prognote").textContent =
+    p.step && p.total ? `step ${p.step} of ${p.total} · ${p.elapsed ?? 0}s`
+                      : `${p.elapsed ?? 0}s elapsed`;
 }
+
+function startComposeProgress() {
+  $("#gen").disabled = true;
+  $("#acts").hidden = true;
+  $("#progress").hidden = false;
+  renderProgress({ frac: 0, phase: "starting", elapsed: 0 });
+
+  const poll = async () => {
+    try {
+      renderProgress(await fetch("/api/progress").then((r) => r.json()));
+    } catch { /* a dropped poll is not worth surfacing; the next one will land */ }
+  };
+  poll();
+  composeTimer = setInterval(poll, 500);
+}
+
 function stopComposeProgress() {
   clearInterval(composeTimer);
   composeTimer = null;
-  const btn = $("#gen");
-  btn.disabled = false;
-  btn.innerHTML = 'Compose <kbd>G</kbd>';
+  $("#progress").hidden = true;
+  $("#acts").hidden = false;
+  $("#gen").disabled = false;
+  $("#gen").innerHTML = 'Compose <kbd>G</kbd>';
 }
 
 async function compose() {
@@ -488,7 +513,14 @@ document.addEventListener("keydown", (e) => {
 (async function boot() {
   try {
     const s = await fetch("/api/status").then((r) => r.json());
-    $("#status").textContent = `${s.points.toLocaleString()} points · ${s.target} · ${s.backend}`;
+    const worker = s.backend === "bank" ? "" :
+      s.worker === "warming" ? " · warming model…"
+      : s.worker === "ready" ? " · model ready"
+      : s.worker === "unavailable" ? " · no generator" : "";
+    $("#status").textContent =
+      `${s.points.toLocaleString()} points · ${s.target} · ${s.backend}${worker}`;
+    // Poll while warming so the header flips to "model ready" on its own.
+    if (s.worker === "warming") setTimeout(boot, 5000);
   } catch {
     $("#status").textContent = "qdrant unreachable — run ./scripts/qdrant_up.sh";
   }

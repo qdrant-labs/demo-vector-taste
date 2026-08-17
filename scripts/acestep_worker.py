@@ -42,6 +42,32 @@ def emit(**payload) -> None:
     sys.stdout.flush()
 
 
+def make_progress(job_id):
+    """ACE-Step's progress callback, forwarded to the parent as protocol events.
+
+    Called as `progress(value, desc="...")` and occasionally positionally, so the signature
+    has to be permissive. Values seen in practice: 0.51 preparing, 0.52 diffusion begins,
+    0.80 decoding, 0.99 writing files. (0.1 and 0.5 belong to the LM planner, which we do
+    not initialise.)
+
+    Note the 0.52 -> 0.80 gap: that is the whole diffusion phase, ~69s of a ~102s run, with
+    no callback in between. Per-step detail comes from the tqdm bar on stderr, which the
+    parent parses.
+    """
+
+    def progress(value=None, desc=None, *args, **kwargs):
+        try:
+            frac = float(value)
+        except (TypeError, ValueError):
+            return None
+        # `desc` also arrives positionally, e.g. progress(0.99, "Preparing audio files...")
+        text = desc if isinstance(desc, str) else (args[0] if args and isinstance(args[0], str) else "")
+        emit(event="progress", id=job_id, frac=frac, desc=text)
+        return None
+
+    return progress
+
+
 def run_job(dit, llm, job: dict) -> dict:
     from acestep.inference import GenerationConfig, GenerationParams, generate_music
 
@@ -68,7 +94,10 @@ def run_job(dit, llm, job: dict) -> dict:
         audio_cover_strength=float(job.get("audio_cover_strength", 0.7)),
     )
 
-    result = generate_music(dit, llm, params, GenerationConfig(batch_size=1))
+    result = generate_music(
+        dit, llm, params, GenerationConfig(batch_size=1),
+        progress=make_progress(job.get("id")),
+    )
     audios = getattr(result, "audios", None) or []
     if not audios:
         # GenerationResult carries the real reason in .error / .status_message. Reporting

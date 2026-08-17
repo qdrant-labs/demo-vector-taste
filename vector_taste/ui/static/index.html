@@ -62,10 +62,24 @@
 
 <section class="taste" id="tastebar" hidden>
   <div class="chips" id="chips"></div>
-  <div class="acts">
+  <div class="acts" id="acts">
     <input id="steer" placeholder="steer the composition (optional)" aria-label="Steer">
     <button id="gen" class="primary">Compose <kbd>G</kbd></button>
     <button id="clear" class="ghost">Clear</button>
+  </div>
+
+  <!-- Real progress, not a timer: the ring is driven by ACE-Step's own callback for phase
+       boundaries and by the diffusion step count for everything in between. -->
+  <div class="progress" id="progress" hidden role="status" aria-live="polite">
+    <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
+      <circle class="ring-track" cx="60" cy="60" r="52"></circle>
+      <circle class="ring-fill" id="ringfill" cx="60" cy="60" r="52"></circle>
+    </svg>
+    <div class="progress-text">
+      <div class="progress-pct" id="progpct">0%</div>
+      <div class="progress-phase" id="progphase">starting…</div>
+      <div class="progress-note dim" id="prognote"></div>
+    </div>
   </div>
 </section>
 

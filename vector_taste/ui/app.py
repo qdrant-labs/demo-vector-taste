@@ -60,9 +60,28 @@ def index():
     return (STATIC / "index.html").read_text()
 
 
+@app.on_event("startup")
+def _startup() -> None:
+    """Pre-load the generation model in the background.
+
+    The worker takes ~150s to load 9GB of checkpoints and reports NO progress while doing
+    it, so paying that during startup turns the first compose from ~250s (150 of them
+    featureless) into ~99s with a real moving ring.
+
+    Skipped for GEN_BACKEND=bank: the stage config never generates, so holding ~4GB would
+    be pure cost. Never blocks -- search must work while this runs.
+    """
+    if GEN_BACKEND == "bank":
+        return
+    from ..worker import prewarm
+
+    prewarm()
+
+
 @app.get("/api/status")
 def status():
     from ..store import collection_info
+    from ..worker import worker_state
 
     try:
         info = collection_info()
@@ -72,7 +91,18 @@ def status():
         "points": info["points"],
         "target": "cloud" if is_cloud() else "local",
         "backend": GEN_BACKEND,
+        "worker": worker_state(),
     }
+
+
+@app.get("/api/progress")
+def progress():
+    """Latest generation progress. Polled by the UI while a compose is in flight."""
+    from ..worker import PROGRESS, worker_state
+
+    snap = PROGRESS.snapshot()
+    snap["worker"] = worker_state()
+    return snap
 
 
 @app.post("/api/search")
