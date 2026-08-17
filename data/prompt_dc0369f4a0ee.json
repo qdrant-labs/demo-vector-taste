@@ -1,6 +1,6 @@
 {
   "params": {
-    "prompt": "driving electronic beat with heavy bass and synths, with hip hop with a heavy beat, electronic production, around 117 BPM, instrumental, no vocals",
+    "prompt": "driving electronic beat with heavy bass and synths, in the style of aggressive and intense hip hop electronic, drum machine, heavily distorted and fuzzy, driving and rhythmic, around 117 BPM, instrumental, no vocals",
     "lyrics": "",
     "audio_duration": 30.0,
     "bpm": 117,
@@ -8,40 +8,31 @@
     "timesignature": "4",
     "num_inference_steps": 8,
     "shift": 3.0,
-    "seed": 42,
+    "seed": 1543727605,
     "task_type": "text2music",
     "audio_cover_strength": 0.7
   },
   "evidence": {
     "n_hits": 10,
+    "n_negatives": 1,
     "tags": [
       "hip-hop",
       "electronic"
     ],
-    "bpm_values": [
-      117,
-      99,
-      99,
-      185,
-      99,
-      123,
-      117,
-      129,
-      92,
-      112
-    ],
-    "keys": [
-      "B",
-      "F#",
-      "F",
-      "G#",
-      "D",
-      "C#",
-      "G",
-      "D#",
-      "F",
-      "D#"
-    ],
+    "descriptors": {
+      "mood": [
+        "aggressive and intense"
+      ],
+      "instrument": [
+        "drum machine"
+      ],
+      "production": [
+        "heavily distorted and fuzzy"
+      ],
+      "texture": [
+        "driving and rhythmic"
+      ]
+    },
     "steer": "driving electronic beat with heavy bass and synths",
     "top_neighbors": [
       "Creo \u2014 Dimension",

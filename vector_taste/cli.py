@@ -131,14 +131,18 @@ def cmd_strategies(args):
 
 # --------------------------------------------------------------------------------- prompt
 def cmd_prompt(args):
-    from .prompt import format_synthesis, save, synthesize
-    from .taste import TasteProfile, recommend
+    from .prompt import format_synthesis, save, seed_from_hash, synthesize
+    from .taste import TasteProfile, negative_hits, recommend
 
     profile = TasteProfile.load(args.profile) if args.profile else TasteProfile(
         positives=args.pos or [], negatives=args.neg or [], steer=args.steer or ""
     )
     hits = recommend(profile, limit=args.limit)
-    synth = synthesize(hits, steer=args.steer or profile.steer, duration=args.duration)
+    synth = synthesize(
+        hits, steer=args.steer or profile.steer, duration=args.duration,
+        negatives=negative_hits(profile), seed=seed_from_hash(profile.hash),
+        steps=args.steps,
+    )
     _p("")
     _p("ACE-Step parameters:")
     _p(format_synthesis(synth))
@@ -150,14 +154,18 @@ def cmd_prompt(args):
 def cmd_generate(args):
     from .generate import generate
     from .prompt import load as load_prompt
-    from .prompt import save, synthesize
-    from .taste import TasteProfile, recommend
+    from .prompt import save, seed_from_hash, synthesize
+    from .taste import TasteProfile, negative_hits, recommend
 
     profile = TasteProfile.load(args.profile)
     synth = load_prompt(profile.hash)
     hits = recommend(profile, limit=args.limit)
     if synth is None:
-        synth = synthesize(hits, steer=profile.steer, duration=args.duration)
+        synth = synthesize(
+            hits, steer=profile.steer, duration=args.duration,
+            negatives=negative_hits(profile), seed=seed_from_hash(profile.hash),
+            steps=args.steps,
+        )
         save(profile.hash, synth)
 
     # Reference clip: a 30s window centred on the WINNING chunk, not the raw segment.
@@ -217,7 +225,8 @@ def cmd_bake(args):
 
     if args.import_from:
         return 0 if import_bank(Path(args.import_from)) else 1
-    bake_bank(profiles=args.profile, backend=args.backend, duration=args.duration)
+    bake_bank(profiles=args.profile, backend=args.backend,
+              duration=args.duration, steps=args.steps)
     return 0
 
 
@@ -241,6 +250,16 @@ def cmd_loop(args):
 
 
 # ------------------------------------------------------------------------------ utilities
+def cmd_describe(args):
+    from .describe import TERMS, describe_collection
+
+    _p(f"  scoring {len(TERMS)} descriptors against stored audio vectors")
+    _p("  (no audio is re-read -- this is a payload update, not a re-ingest)")
+    r = describe_collection(per_category=args.per_category)
+    _p(f"\n  described {r['segments']} segments -> {r['points']} points")
+    return 0
+
+
 def cmd_demo_profiles(args):
     from .demo import build_demo_profiles
 
@@ -353,6 +372,7 @@ def main(argv=None) -> int:
     pr.add_argument("--steer", default="")
     pr.add_argument("--limit", type=int, default=10)
     pr.add_argument("--duration", type=float, default=30.0)
+    pr.add_argument("--steps", type=int, default=8)
     pr.set_defaults(func=cmd_prompt)
 
     g = sub.add_parser("generate", help="compose a track")
@@ -360,6 +380,7 @@ def main(argv=None) -> int:
     g.add_argument("--backend", default=None)
     g.add_argument("--limit", type=int, default=10)
     g.add_argument("--duration", type=float, default=30.0)
+    g.add_argument("--steps", type=int, default=8)
     g.add_argument("--no-reference", action="store_true")
     g.set_defaults(func=cmd_generate)
 
@@ -367,6 +388,7 @@ def main(argv=None) -> int:
     bk.add_argument("--profile", action="append")
     bk.add_argument("--backend", default="local")
     bk.add_argument("--duration", type=float, default=30.0)
+    bk.add_argument("--steps", type=int, default=8)
     bk.add_argument(
         "--import-from",
         metavar="DIR",
@@ -379,6 +401,10 @@ def main(argv=None) -> int:
     lp.add_argument("--audio")
     lp.add_argument("--no-upsert", action="store_true")
     lp.set_defaults(func=cmd_loop)
+
+    ds = sub.add_parser("describe", help="tag every segment with CLAP descriptors")
+    ds.add_argument("--per-category", type=int, default=2)
+    ds.set_defaults(func=cmd_describe)
 
     sub.add_parser(
         "demo-profiles", help="build the scripted demo taste profiles"

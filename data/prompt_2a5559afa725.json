@@ -1,6 +1,6 @@
 {
   "params": {
-    "prompt": "dreamy lo-fi hip hop with vinyl crackle and mellow keys, with hip hop with a heavy beat, electronic production, around 108 BPM, instrumental, no vocals",
+    "prompt": "dreamy lo-fi hip hop with vinyl crackle and mellow keys, in the style of hypnotic and trance-like hip hop electronic, hand percussion, lo-fi and tape-saturated, syncopated and groovy, around 108 BPM, instrumental, no vocals",
     "lyrics": "",
     "audio_duration": 30.0,
     "bpm": 108,
@@ -8,40 +8,31 @@
     "timesignature": "4",
     "num_inference_steps": 8,
     "shift": 3.0,
-    "seed": 42,
+    "seed": 710236591,
     "task_type": "text2music",
     "audio_cover_strength": 0.7
   },
   "evidence": {
     "n_hits": 10,
+    "n_negatives": 1,
     "tags": [
       "hip-hop",
       "electronic"
     ],
-    "bpm_values": [
-      172,
-      92,
-      92,
-      89,
-      108,
-      172,
-      96,
-      89,
-      161,
-      144
-    ],
-    "keys": [
-      "G#",
-      "D",
-      "G",
-      "G",
-      "B",
-      "B",
-      "F",
-      "G",
-      "A#",
-      "E"
-    ],
+    "descriptors": {
+      "mood": [
+        "hypnotic and trance-like"
+      ],
+      "instrument": [
+        "hand percussion"
+      ],
+      "production": [
+        "lo-fi and tape-saturated"
+      ],
+      "texture": [
+        "syncopated and groovy"
+      ]
+    },
     "steer": "dreamy lo-fi hip hop with vinyl crackle and mellow keys",
     "top_neighbors": [
       "Black Ant \u2014 Underdog",

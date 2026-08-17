@@ -136,6 +136,28 @@ def discover(target: str, context: list[tuple[str, str]], limit: int = 10) -> li
     return _to_hits(res.groups)[:limit]
 
 
+def negative_hits(profile: TasteProfile) -> list[Hit]:
+    """The negative examples as Hits, so prompt synthesis can contrast against them.
+
+    Retrieved rather than re-queried: negatives are point IDs the user already marked, and
+    all we need is their payload (descriptors, tags) to subtract from the positive side.
+    """
+    if not profile.negatives:
+        return []
+    recs = get_client().retrieve(COLLECTION, ids=profile.negatives, with_payload=True)
+    return [
+        Hit(
+            segment_id=(r.payload or {}).get("segment_id", str(r.id)),
+            score=0.0,
+            point_id=str(r.id),
+            payload=r.payload or {},
+            start_sec=int((r.payload or {}).get("start_sec", 0)),
+            n_chunks=1,
+        )
+        for r in recs
+    ]
+
+
 def taste_centroid(profile: TasteProfile) -> np.ndarray:
     """Mean of the positive chunk vectors, re-normalized.
 

@@ -108,8 +108,61 @@ function play(url, label) {
   }).catch((e) => toast("playback failed: " + e.message));
 }
 
-audioEl.addEventListener("ended", () => { stopViz(); state.playing = null; render(); });
-audioEl.addEventListener("pause", () => stopViz());
+audioEl.addEventListener("ended", () => { stopViz(); state.playing = null; syncTransport(); render(); });
+audioEl.addEventListener("pause", () => { stopViz(); syncTransport(); render(); });
+audioEl.addEventListener("play", () => { syncTransport(); render(); });
+
+/* ------------------------------------------------------------------------- transport */
+const SKIP = 15;
+const fmtTime = (s) =>
+  Number.isFinite(s) ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}` : "0:00";
+
+/* Clamp rather than letting currentTime go negative or past the end: seeking past the end
+   fires `ended` and drops the track, which mid-demo looks like a crash. */
+function skip(delta) {
+  if (!audioEl.src) return;
+  const dur = Number.isFinite(audioEl.duration) ? audioEl.duration : Infinity;
+  audioEl.currentTime = Math.max(0, Math.min(dur - 0.05, audioEl.currentTime + delta));
+  syncTransport();
+}
+
+function togglePlay() {
+  if (!audioEl.src) {                       // nothing loaded yet: start the cursor row
+    const cur = state.hits[state.cursor] || state.hits[0];
+    if (cur) play(cur.audio_url, `${cur.artist} — ${cur.title}`);
+    return;
+  }
+  if (audioEl.paused) {
+    initAnalyser();
+    if (ctx && ctx.state === "suspended") ctx.resume();
+    audioEl.play().then(startViz).catch((e) => toast("playback failed: " + e.message));
+  } else {
+    audioEl.pause();
+  }
+}
+
+let seeking = false;
+function syncTransport() {
+  const playing = audioEl.src && !audioEl.paused;
+  $("#playpause").textContent = playing ? "Pause" : "Play";
+  const cur = audioEl.currentTime || 0;
+  const dur = Number.isFinite(audioEl.duration) ? audioEl.duration : 0;
+  $("#time").textContent = `${fmtTime(cur)} / ${fmtTime(dur)}`;
+  if (!seeking && dur) $("#seek").value = Math.round((cur / dur) * 1000);
+}
+
+audioEl.addEventListener("timeupdate", syncTransport);
+audioEl.addEventListener("loadedmetadata", syncTransport);
+$("#playpause").onclick = togglePlay;
+$("#back15").onclick = () => skip(-SKIP);
+$("#fwd15").onclick = () => skip(SKIP);
+$("#seek").addEventListener("input", () => { seeking = true; });
+$("#seek").addEventListener("change", (e) => {
+  seeking = false;
+  if (Number.isFinite(audioEl.duration)) {
+    audioEl.currentTime = (e.target.value / 1000) * audioEl.duration;
+  }
+});
 
 /* --------------------------------------------------------------------------- rendering */
 function tagFor(h) {
@@ -144,12 +197,15 @@ function rowHtml(h, i, dropped) {
     isNeg ? "is-neg" : "",
     state.playing === h.audio_url && !audioEl.paused ? "playing" : "",
   ].join(" ");
+  const isPlaying = state.playing === h.audio_url && !audioEl.paused;
   const sub = [h.bpm ? h.bpm + " BPM" : null, h.key, h.license, (h.tags || []).slice(0, 2).join(", ")]
     .filter(Boolean).join(" · ");
   return `
   <div class="${cls}" data-i="${i}" data-id="${h.point_id}" data-url="${h.audio_url}"
        tabindex="0" role="button" aria-current="${state.cursor === i}"
        aria-label="${h.artist} — ${h.title}">
+    <button class="rowplay" data-play="1" aria-label="${isPlaying ? "Pause" : "Play"} ${esc(h.title)}"
+            title="${isPlaying ? "Pause" : "Play"}">${isPlaying ? "❚❚" : "▶"}</button>
     <div class="rank">${dropped ? "—" : i + 1}</div>
     <div class="meta">
       <div class="name">${esc(h.artist)} — ${esc(h.title)} ${tagFor(h)}</div>
@@ -326,6 +382,11 @@ $("#results").addEventListener("click", (e) => {
   if (mk) { mark(row.dataset.id, mk.dataset.mark); return; }
   const i = +row.dataset.i;
   if (i >= 0) state.cursor = i;
+  // The row's own play button toggles the CURRENT track rather than restarting it.
+  if (e.target.closest("[data-play]") && state.playing === row.dataset.url) {
+    togglePlay();
+    return;
+  }
   play(row.dataset.url, row.getAttribute("aria-label"));
 });
 
@@ -381,8 +442,15 @@ document.addEventListener("keydown", (e) => {
       document.querySelector(`[data-i="${state.cursor}"]`)?.scrollIntoView({ block: "nearest" });
       break;
     case " ":
-      if (cur) { e.preventDefault(); play(cur.audio_url, `${cur.artist} — ${cur.title}`); }
+      e.preventDefault();
+      // Toggle whatever is loaded; only start the cursor row if nothing is.
+      if (audioEl.src) togglePlay();
+      else if (cur) play(cur.audio_url, `${cur.artist} — ${cur.title}`);
       break;
+    case "ArrowLeft":
+      e.preventDefault(); skip(-SKIP); break;
+    case "ArrowRight":
+      e.preventDefault(); skip(SKIP); break;
     case "+": case "=":
       if (cur) mark(cur.point_id, "pos"); break;
     case "-": case "_":

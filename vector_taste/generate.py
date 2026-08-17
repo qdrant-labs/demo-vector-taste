@@ -1,7 +1,7 @@
 """Generation with four interchangeable backends.
 
     bank       pre-generated audio, keyed by taste-profile hash. Stage default.
-    local      ACE-Step 1.5 via its own REST API (Apple Silicon MLX, or CUDA)
+    local      ACE-Step 1.5 via a resident worker process (Apple Silicon MLX, or CUDA)
     modal      your own Modal deployment
     replicate  hosted, one API token
 
@@ -9,9 +9,9 @@ Why ACE-Step runs out of process
 --------------------------------
 ACE-Step 1.5 pins `transformers>=4.51,<4.58`; CLAP here needs `transformers>=5`. They
 cannot share a virtualenv. So ACE-Step is installed separately (see
-scripts/acestep_setup.sh) and spoken to over its own localhost REST API. That is still
-fully offline — localhost is not the network — and it keeps the model resident between
-requests, which matters because loading it is far slower than generating with it.
+scripts/acestep_setup.sh) and driven by a resident subprocess (see worker.py) that keeps
+the model loaded between requests -- loading it costs ~60-100s while the diffusion steps
+themselves are 1-2s each. Fully offline: no sockets, no network.
 
 Every backend falls back to `bank`. The fallback is loud in the logs and silent on screen:
 an audience should never see a stack trace, and the presenter should always know it fired.
@@ -31,7 +31,6 @@ from .prompt import GenerationParams
 
 log = logging.getLogger("vector_taste.generate")
 
-ACESTEP_URL = os.getenv("ACESTEP_URL", "http://localhost:8001")
 BANK_INDEX = BANK / "bank.json"
 
 
@@ -150,48 +149,40 @@ def bank_add(
     return dest
 
 
-def _generate_local(params: GenerationParams, reference_audio: Path | None, out: Path) -> Path:
-    """POST to a locally running ACE-Step API server."""
-    import httpx
-
-    body: dict = {
-        "prompt": params.prompt,
-        "lyrics": params.lyrics,
-        "audio_duration": params.audio_duration,
-        "infer_step": params.num_inference_steps,
-        "shift": params.shift,
+def job_for(params: GenerationParams, profile_hash: str, out: Path,
+            reference_audio: Path | None = None) -> dict:
+    """Worker job dict. Shared by live generation and `vt bake` so they cannot diverge."""
+    return {
+        "id": profile_hash,
+        "caption": params.prompt,
+        "duration": params.audio_duration,
+        "bpm": params.bpm,
+        "keyscale": params.keyscale,
         "seed": params.seed,
-        "task_type": "cover" if reference_audio else "text2music",
+        "inference_steps": params.num_inference_steps,
+        "reference_audio": str(reference_audio) if reference_audio else None,
+        "audio_cover_strength": params.audio_cover_strength,
+        "out": str(out),
     }
-    if params.bpm:
-        body["bpm"] = params.bpm
-    if params.keyscale:
-        body["keyscale"] = params.keyscale
-    if reference_audio:
-        body["reference_audio"] = str(reference_audio)
-        body["audio_cover_strength"] = params.audio_cover_strength
+
+
+def _generate_local(
+    params: GenerationParams, reference_audio: Path | None, out: Path, profile_hash: str
+) -> Path:
+    """Generate via the resident ACE-Step worker.
+
+    This replaces an HTTP POST to `ACESTEP_URL/generate`, an endpoint that does not exist --
+    ACE-Step's API is task-based (/create_random_sample -> /query_result), so that path had
+    never actually worked. Talking to our own worker is both simpler and under our control.
+    """
+    from .worker import AceStepWorker, WorkerError
 
     try:
-        r = httpx.post(f"{ACESTEP_URL}/generate", json=body, timeout=900)
-        r.raise_for_status()
-    except Exception as exc:
-        raise GenerationError(
-            f"ACE-Step API at {ACESTEP_URL} unreachable or failed ({exc}). "
-            "Start it with scripts/acestep_setup.sh, or use GEN_BACKEND=bank."
-        ) from exc
-
-    ctype = r.headers.get("content-type", "")
-    if ctype.startswith("audio/") or ctype == "application/octet-stream":
-        out.write_bytes(r.content)
-        return out
-
-    # Otherwise the server returns JSON pointing at a file it wrote.
-    data = r.json()
-    src = data.get("path") or data.get("audio_path") or (data.get("audios") or [None])[0]
-    if not src or not Path(src).exists():
-        raise GenerationError(f"ACE-Step returned no usable audio path: {str(data)[:200]}")
-    shutil.copy2(src, out)
-    return out
+        return AceStepWorker.get().generate(
+            job_for(params, profile_hash, out, reference_audio)
+        )
+    except WorkerError as exc:
+        raise GenerationError(str(exc)) from exc
 
 
 def _generate_replicate(params: GenerationParams, out: Path) -> Path:
@@ -252,7 +243,7 @@ def generate(
 
     try:
         if backend in ("local", "modal"):
-            path = _generate_local(params, reference_audio, out)
+            path = _generate_local(params, reference_audio, out, profile_hash)
         elif backend == "replicate":
             path = _generate_replicate(params, out)
         else:

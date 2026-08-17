@@ -48,6 +48,9 @@ class TasteReq(BaseModel):
     negatives: list[str] = []
     steer: str = ""
     limit: int = 12
+    # Speed/quality trade for live generation. 15s roughly halves the wait.
+    duration: float = 30.0
+    steps: int = 8
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -114,15 +117,19 @@ def taste(req: TasteReq):
 def generate_route(req: TasteReq):
     from ..generate import generate
     from ..prompt import save as save_prompt
-    from ..prompt import synthesize
-    from ..taste import TasteProfile, recommend, taste_centroid
+    from ..prompt import seed_from_hash, synthesize
+    from ..taste import TasteProfile, negative_hits, recommend, taste_centroid
 
     profile = TasteProfile(req.positives, req.negatives, req.steer)
     if profile.is_empty():
         raise HTTPException(400, "mark at least one positive first")
 
     hits = recommend(profile, limit=10)
-    synth = synthesize(hits, steer=req.steer)
+    synth = synthesize(
+        hits, steer=req.steer, duration=req.duration,
+        negatives=negative_hits(profile), seed=seed_from_hash(profile.hash),
+        steps=req.steps,
+    )
     save_prompt(profile.hash, synth)
     profile.save()
 

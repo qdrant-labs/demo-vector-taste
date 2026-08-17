@@ -180,14 +180,42 @@ button.primary kbd {
 }
 
 /* ------------------------------------------------------------------------ equalizer */
+/* Sticky so the transport stays reachable while scrolling a long result list — on stage
+   you should never have to scroll back up to pause. */
 .viz {
+  position: sticky;
+  top: 0;
+  z-index: 5;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: var(--s1) var(--s2);
   margin-bottom: var(--s2);
+  box-shadow: 0 8px 24px -12px rgba(0, 0, 0, 0.6);
 }
-#eq { width: 100%; height: 90px; display: block; }
+
+.transport {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  margin-top: var(--s1);
+}
+.transport button { padding: var(--s1) var(--s2); font-size: 0.9em; }
+.transport .time {
+  font: 400 0.85em var(--font-mono);
+  color: var(--dim);
+  white-space: nowrap;
+}
+#seek {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);   /* native range styling, brand-coloured */
+  height: 4px;
+  cursor: pointer;
+}
+/* Kept short: this bar is sticky, so every pixel of it is screen the results
+   don't get. 56px is still legible as a spectrum on a projector. */
+#eq { width: 100%; height: 56px; display: block; }
 .viz-label {
   display: flex; gap: var(--s1);
   font: 400 0.85em var(--font-mono);
@@ -229,7 +257,7 @@ button.primary kbd {
 .results { display: flex; flex-direction: column; gap: var(--s1); }
 .row {
   display: grid;
-  grid-template-columns: 2.6rem 1fr auto auto;
+  grid-template-columns: 2.4rem 2.2rem 1fr auto auto;
   align-items: center;
   gap: var(--s2);
   background: var(--panel);
@@ -245,6 +273,15 @@ button.primary kbd {
 .row.is-pos { border-left-color: var(--pos); }
 .row.is-neg { border-left-color: var(--neg); opacity: 0.58; }
 
+.rowplay {
+  padding: 6px 0;
+  width: 2.2rem;
+  font-size: 0.8em;
+  line-height: 1;
+  border-color: var(--line);
+  color: var(--fg);
+}
+.row.playing .rowplay { background: var(--accent); border-color: var(--accent); color: #FFFFFF; }
 .rank { color: var(--dim); font-family: var(--font-mono); text-align: right; }
 .meta { min-width: 0; }
 .name { font-size: 1.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -353,8 +390,9 @@ audio { width: 100%; margin-top: var(--s1); }
 
 /* ---------------------------------------------------------------------- responsive */
 @media (max-width: 640px) {
-  .row { grid-template-columns: 1.8rem 1fr auto; gap: var(--s1); }
-  .row .score { display: none; }
+  .row { grid-template-columns: 2rem 1fr auto; gap: var(--s1); }
+  .row .score, .row .rank { display: none; }
+  .transport .time { font-size: 0.75em; }
   .acts { flex-wrap: wrap; }
   .brand .divider, h1 { display: none; }   /* logo alone carries it on narrow screens */
   .status { margin-left: auto; }

@@ -1,6 +1,6 @@
 {
   "params": {
-    "prompt": "warm acoustic guitar, intimate and sparse, with acoustic folk, instrumental, guitar-driven rock, around 112 BPM, instrumental, no vocals",
+    "prompt": "warm acoustic guitar, intimate and sparse, in the style of sombre and solemn folk instrumental, grand piano, dry and close-miked, dense and layered, around 112 BPM, instrumental, no vocals",
     "lyrics": "",
     "audio_duration": 30.0,
     "bpm": 112,
@@ -8,41 +8,31 @@
     "timesignature": "4",
     "num_inference_steps": 8,
     "shift": 3.0,
-    "seed": 42,
+    "seed": 813584723,
     "task_type": "text2music",
     "audio_cover_strength": 0.7
   },
   "evidence": {
     "n_hits": 10,
+    "n_negatives": 1,
     "tags": [
       "folk",
-      "instrumental",
-      "rock"
+      "instrumental"
     ],
-    "bpm_values": [
-      129,
-      129,
-      96,
-      99,
-      112,
-      103,
-      172,
-      92,
-      129,
-      112
-    ],
-    "keys": [
-      "B",
-      "G",
-      "A",
-      "G",
-      "F",
-      "C",
-      "G",
-      "E",
-      "G#",
-      "A"
-    ],
+    "descriptors": {
+      "mood": [
+        "sombre and solemn"
+      ],
+      "instrument": [
+        "grand piano"
+      ],
+      "production": [
+        "dry and close-miked"
+      ],
+      "texture": [
+        "dense and layered"
+      ]
+    },
     "steer": "warm acoustic guitar, intimate and sparse",
     "top_neighbors": [
       "David Mumford \u2014 Twinkle Twinkle (Instrumental)",

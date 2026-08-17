@@ -45,10 +45,18 @@
   <button id="go" class="primary">Search</button>
 </section>
 
-<!-- Spectrum analyzer on whatever is playing. Doubles as proof audio is actually
-     reaching the output device, which is the thing that silently kills a music demo. -->
+<!-- Transport + spectrum analyzer on whatever is playing. The analyzer doubles as proof
+     audio is actually reaching the output device, which is the thing that silently kills
+     a music demo. Sticky so it stays reachable while scrolling a long result list. -->
 <section class="viz" id="viz" hidden>
-  <canvas id="eq" height="90" aria-hidden="true"></canvas>
+  <canvas id="eq" height="56" aria-hidden="true"></canvas>
+  <div class="transport">
+    <button id="back15" class="ghost" aria-label="Back 15 seconds" title="Back 15s (←)">−15s</button>
+    <button id="playpause" class="primary" aria-label="Play or pause" title="Play/pause (space)">Play</button>
+    <button id="fwd15" class="ghost" aria-label="Forward 15 seconds" title="Forward 15s (→)">+15s</button>
+    <input id="seek" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek">
+    <span class="time" id="time">0:00 / 0:00</span>
+  </div>
   <div class="viz-label"><span id="nowplaying">—</span><span class="dim" id="eqnote"></span></div>
 </section>
 
@@ -68,7 +76,8 @@
     <p class="dim">Then mark results <span class="pos">+</span> more like this,
        <span class="neg">−</span> less like this — and watch the list move.</p>
     <p class="keys dim"><kbd>/</kbd> search · <kbd>↑↓</kbd> move · <kbd>space</kbd> play ·
-       <kbd>+</kbd>/<kbd>−</kbd> mark · <kbd>G</kbd> compose · <kbd>T</kbd> theme</p>
+       <kbd>←</kbd><kbd>→</kbd> ±15s · <kbd>+</kbd>/<kbd>−</kbd> mark · <kbd>G</kbd> compose ·
+       <kbd>T</kbd> theme</p>
   </div>
 </main>
 

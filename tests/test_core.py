@@ -223,3 +223,84 @@ def test_bank_best_match_without_centroid_is_exact_only():
 
     path, note = bank_best_match("definitely-not-a-real-hash", None)
     assert path is None and note == ""
+
+
+# --------------------------------------------------------------- descriptors / prompts
+def _dhit(seg, descriptors, tags=("hip-hop",), bpm=100):
+    return Hit(seg, 0.5, f"p-{seg}", {"descriptors": list(descriptors),
+                                      "tags": list(tags), "bpm": bpm}, 0, 1)
+
+
+def test_seed_differs_per_taste_and_is_stable():
+    """Every bank entry used seed=42, so identical noise made every track sound alike."""
+    from vector_taste.prompt import seed_from_hash
+
+    a, b = seed_from_hash("2a5559afa725"), seed_from_hash("b07e5152536a")
+    assert a != b
+    assert seed_from_hash("2a5559afa725") == a          # stable for the same taste
+    assert 0 <= a < 2**31
+
+
+def test_negative_removes_shared_descriptors():
+    """A descriptor strong in BOTH sides is not what distinguishes the taste.
+
+    This is the only route by which a negative reaches generation at all -- ACE-Step has no
+    negative-prompt field.
+    """
+    from vector_taste.prompt import contrastive_descriptors
+
+    pos = [_dhit("a", ["dreamy and hazy", "grand piano"])]
+    neg = [_dhit("b", ["dreamy and hazy", "drum machine"])]
+
+    without = contrastive_descriptors(pos, None)
+    with_neg = contrastive_descriptors(pos, neg)
+    assert "dreamy and hazy" in without["mood"]
+    assert "dreamy and hazy" not in with_neg["mood"]     # cancelled by the negative
+    assert "grand piano" in with_neg["instrument"]       # unique to the positive, survives
+
+
+def test_different_tastes_give_different_prompts():
+    """The actual reported bug: every taste produced the same prompt."""
+    from vector_taste.prompt import synthesize
+
+    a = synthesize([_dhit("a", ["dreamy and hazy", "grand piano"], ("folk",), 90)])
+    b = synthesize([_dhit("b", ["aggressive and intense", "drum machine"], ("rock",), 160)])
+    assert a.params.prompt != b.params.prompt
+    assert "grand piano" in a.params.prompt
+    assert "drum machine" in b.params.prompt
+
+
+def test_prompt_says_instrumental_once():
+    """The old template appended the suffix while `instrumental` was also a corpus tag."""
+    from vector_taste.prompt import synthesize
+
+    p = synthesize([_dhit("a", ["dreamy and hazy"], ("instrumental",))]).params.prompt
+    assert p.count("no vocals") == 1
+
+
+def test_prompt_respects_caption_limit():
+    """ACE-Step caps `caption` at 512 characters."""
+    from vector_taste.prompt import MAX_CAPTION, synthesize
+
+    p = synthesize([_dhit("a", ["dreamy and hazy"])], steer="x " * 600)
+    assert len(p.params.prompt) <= MAX_CAPTION
+
+
+def test_descriptor_categories_are_disjoint():
+    """A term in two categories would be double-counted in the contrast."""
+    from vector_taste.describe import FLAT, TERMS
+
+    assert len(TERMS) == len(set(TERMS))
+    assert len(FLAT) == len(TERMS)
+
+
+def test_top_descriptors_picks_per_category():
+    """Selection is per-category so one strong category cannot crowd out the others."""
+    import numpy as np
+
+    from vector_taste.describe import FLAT, VOCAB, top_descriptors
+
+    scores = np.zeros(len(FLAT), dtype=np.float32)
+    got = top_descriptors(scores, per_category=1)
+    assert len(got) == len(VOCAB)
+    assert len({FLAT[FLAT.index((c, t))][0] for c, t in FLAT if t in got}) == len(VOCAB)
