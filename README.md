@@ -139,9 +139,46 @@ licensed stock music) is better evidenced.
 
 ---
 
+## What it looks like working
+
+Search returns different, genre-appropriate results per query:
+
+```
+$ uv run vt search --text "aggressive loud distorted metal guitar"
+   1   0.3772   NanowaR Of Steel — Heavy Metal Kibbutz
+$ uv run vt search --text "solo classical piano, gentle"
+   1   0.3890   Jason Shaw — Timen Passing
+```
+
+Rejecting one result visibly reorders the rest:
+
+```
+$ uv run vt taste --pos <id> --pos <id> --neg <id> --diff
+  [-] DROPPED           Uncle Milk — On two hours sleep
+  [+] NEW       0.7088  Jason Shaw — Feels Good 2 B
+  [~] up   #4->#3   0.7144  Uncle Milk — Ruggles
+  (1 in, 1 out, 5 moved, 2 unchanged)
+```
+
+And the closing number:
+
+```
+$ uv run vt loop <profile>
+  The generated track lands at the 98th percentile.
+  Closer to your taste centroid than 98% of the 1005 segments in the library.
+
+    generated   cosine +0.7306   percentile  97.6
+    best human  cosine +0.8218   percentile  99.6   <- retrieval baseline
+```
+
+Interactive stages are sub-second (`search` 0.59s, `taste` 0.02s, `loop` 0.43s). Ingesting
+1,005 tracks takes ~7 minutes; baking one track takes ~2 minutes. Both are one-time.
+
 ## Notes for anyone building on this
 
-A few things that cost real debugging time and aren't obvious from the docs:
+A few things that cost real debugging time and aren't obvious from the docs.
+[`docs/FINDINGS.md`](docs/FINDINGS.md) has all sixteen with measurements; these are the ones
+most likely to bite you:
 
 1. **`qdrant-client` removed `.search()`, `.recommend()`, and `.discover()`** in 1.16.0 — they're
    gone, not deprecated. Everything is `query_points()` / `query_points_groups()`. Tutorials older
@@ -158,6 +195,16 @@ A few things that cost real debugging time and aren't obvious from the docs:
 5. **At this corpus size Qdrant doesn't build an HNSW index at all** (the threshold is ~5000 vectors
    per segment), so search is already exact and `hnsw_ef` does nothing. We pass `exact=True` to say
    so out loud.
+6. **The music-specific CLAP checkpoint is degenerate on this corpus.** `larger_clap_music` has the
+   better published GTZAN score (71% vs 51%) and scores *exactly at chance* here, emitting cosine
+   0.99 between unrelated songs. We use `larger_clap_general`. Run
+   `uv run python scripts/eval_embedders.py` before trusting any embedder — the tell needs no
+   labels at all: **mean pairwise cosine above ~0.8 means the encoder has collapsed.**
+7. **Style conditioning is `text2music` + `reference_audio`, not `task_type="cover"`.** `cover`
+   means re-record *this specific song* and requires `src_audio`; passing only `reference_audio`
+   fails with "Task 'cover' requires source audio".
+8. **ACE-Step and CLAP cannot share a virtualenv** — ACE-Step pins `transformers<4.58`, CLAP needs
+   `>=5`. `scripts/acestep_setup.sh` installs it separately.
 
 ---
 

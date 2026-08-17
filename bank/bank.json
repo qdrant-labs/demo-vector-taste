@@ -1,4 +1,22 @@
 {
+  "2a5559afa725": {
+    "backend": "local",
+    "bpm": 108,
+    "duration": 30.0,
+    "file": "2a5559afa725.wav",
+    "keyscale": "G major",
+    "prompt": "dreamy lo-fi hip hop with vinyl crackle and mellow keys, with hip hop with a heavy beat, electronic production, around 108 BPM, instrumental, no vocals",
+    "seed": 42
+  },
+  "35e8c150b1b8": {
+    "backend": "local",
+    "bpm": 108,
+    "duration": 30.0,
+    "file": "35e8c150b1b8.wav",
+    "keyscale": "G major",
+    "prompt": "hip hop with a heavy beat, electronic production, around 108 BPM, instrumental, no vocals",
+    "seed": 42
+  },
   "b07e5152536a": {
     "backend": "local",
     "bpm": 112,
@@ -6,6 +24,15 @@
     "file": "b07e5152536a.wav",
     "keyscale": "G major",
     "prompt": "warm acoustic guitar, intimate and sparse, with acoustic folk, instrumental, guitar-driven rock, around 112 BPM, instrumental, no vocals",
+    "seed": 42
+  },
+  "dc0369f4a0ee": {
+    "backend": "local",
+    "bpm": 117,
+    "duration": 30.0,
+    "file": "dc0369f4a0ee.wav",
+    "keyscale": "F major",
+    "prompt": "driving electronic beat with heavy bass and synths, with hip hop with a heavy beat, electronic production, around 117 BPM, instrumental, no vocals",
     "seed": 42
   }
 }

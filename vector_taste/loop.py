@@ -83,13 +83,17 @@ def close_loop(
     best_i = int(np.argmax(sims))
     cos, pct, population = percentile_against_centroid(vecs[best_i], centroid_vec)
 
-    # Baseline: the top human neighbour under the same taste. If generation lands near this,
-    # the co-creation claim holds; if far below, that is a real result worth saying out loud.
-    top = recommend(profile, limit=1)
+    # Baseline: the best human track that is NOT one of the user's own examples.
+    #
+    # Excluding the positives matters. The centroid is the mean OF those positives, so a
+    # positive scores ~0.91 against it by construction — comparing generation to that is
+    # comparing it to the question rather than to an answer, and makes any result look bad.
+    # The fair question is "how close did the machine get, versus the closest thing the
+    # library already had that you hadn't already picked?"
+    chosen = set(profile.positives)
+    top = [h for h in recommend(profile, limit=10) if h.point_id not in chosen]
     if top:
-        b_cos, b_pct, _ = percentile_against_centroid(
-            _fetch_one(top[0].point_id), centroid_vec
-        )
+        b_cos, b_pct, _ = percentile_against_centroid(_fetch_one(top[0].point_id), centroid_vec)
     else:
         b_cos, b_pct = float("nan"), float("nan")
 

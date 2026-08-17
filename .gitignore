@@ -17,6 +17,13 @@ timings.jsonl
 *.flac
 !tests/fixtures/*.wav
 
+# The pre-baked generation bank IS committed (~5.5MB per track). It is our own model
+# output, it makes `git clone && uv sync && vt ui` a working demo with real audio, and it
+# is the stage path — a demo that depends on downloading a release bundle is a demo that
+# depends on the network. Corpus audio stays out: that is other people's music, fetched
+# by a script under its own licence.
+!bank/*.wav
+
 # python
 __pycache__/
 *.py[cod]

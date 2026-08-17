@@ -237,6 +237,65 @@ Worth noting the original research flagged this exact risk in advance — the HF
 provenance is undocumented, and the advice was to benchmark both on our own data before
 committing. That advice was correct and the answer was the opposite of the recommendation.
 
+## 14. `task_type="cover"` is the wrong way to use a style reference
+
+Widely repeated guidance — including the plan this repo was built from — says style
+conditioning is `reference_audio` + `task_type="cover"`. Running it fails immediately:
+
+```
+Task 'cover' requires source audio, but none was provided.
+```
+
+ACE-Step distinguishes two different audio inputs:
+
+| Input | Meaning | Task type |
+|---|---|---|
+| `reference_audio` | timbre / style conditioning | works with `text2music` |
+| `src_audio` | the track being re-recorded | what `cover` requires |
+
+`cover` means *re-record this specific song*. We want **new** music in the style of a
+retrieved neighbour, which is `task_type="text2music"` with `reference_audio` set.
+
+This cost four identical silent failures before being found, because the worker reported
+only "no audio" and discarded `GenerationResult.error`. The lesson is the ordinary one:
+the error path deserves as much care as the happy path, especially when it wraps somebody
+else's library.
+
+## 15. Measured stage timings
+
+From `timings.jsonl` on the M4 Air, corpus of 1,005 tracks / 3,015 points:
+
+| Stage | Mean | Notes |
+|---|---|---|
+| search (text -> audio) | **0.59 s** | first call includes model load; steady state is faster |
+| taste refinement | **0.02 s** | recommend with positives + negatives, grouped |
+| close the loop | **0.43 s** | re-embed generated track + percentile over the whole corpus |
+| ingest | 394 s | 1,005 tracks, one-time |
+| bake (per track) | ~120-143 s | one-time, offline |
+
+Every interactive beat is sub-second, so the talk's pacing is set by how long you let tracks
+play, not by the machine. Generation is instant on stage because it comes from the bank.
+
+## 16. What the finale actually reports
+
+Three baked profiles, scored against their own taste centroids:
+
+| Profile | Generated | Best human (excluding your own picks) |
+|---|---|---|
+| acoustic | **98th** percentile, cos 0.731 | 99.6th, cos 0.822 |
+| electronic | **91st** percentile, cos 0.667 | 99.7th, cos 0.831 |
+| lo-fi | **74th** percentile, cos 0.503 | 99.8th, cos 0.911 |
+
+The generated track lands in the right neighbourhood every time, and **retrieval still beats
+generation** at matching a taste. That is the honest result and it is more interesting than
+the flattering one — the machine executes the position, but the library already contained
+something closer.
+
+One subtlety worth guarding: the baseline excludes the user's own positive examples. The
+centroid is the mean *of* those positives, so a positive scores ~0.91 against it by
+construction; comparing generation to that is comparing it to the question rather than to
+an answer.
+
 ## Still open
 
 - **Whether TwelveLabs Marengo's text tower is aligned to its audio tower.** Bedrock's own
