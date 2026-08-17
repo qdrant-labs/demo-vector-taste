@@ -1,0 +1,11 @@
+{
+  "positives": [
+    "24f70c43-9ab5-56c0-95da-ea02e57790c9",
+    "e1092f5a-5fd3-51bd-9d5a-5fc6338cdcfe"
+  ],
+  "negatives": [
+    "74630d47-52c0-5518-938b-6acff5c90502"
+  ],
+  "steer": "gentle solo piano",
+  "hash": "b7c619761414"
+}

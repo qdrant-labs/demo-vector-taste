@@ -167,7 +167,13 @@ def cmd_generate(args):
     if hits and not args.no_reference:
         ref = _reference_clip(hits[0])
 
-    res = generate(synth.params, profile.hash, reference_audio=ref, backend=args.backend)
+    from .taste import taste_centroid
+
+    centroid = taste_centroid(profile) if profile.positives else None
+    res = generate(
+        synth.params, profile.hash, reference_audio=ref,
+        backend=args.backend, centroid=centroid,
+    )
     _p("")
     _p(f"  backend    {res.backend}{'  (from bank)' if res.from_bank else ''}")
     _p(f"  reference  {ref.name if ref else '(none)'}")
@@ -217,12 +223,14 @@ def cmd_bake(args):
 
 # ----------------------------------------------------------------------------------- loop
 def cmd_loop(args):
-    from .generate import bank_lookup
+    from .generate import bank_best_match
     from .loop import close_loop
-    from .taste import TasteProfile
+    from .taste import TasteProfile, taste_centroid
 
     profile = TasteProfile.load(args.profile)
-    audio = Path(args.audio) if args.audio else bank_lookup(profile.hash)
+    audio = Path(args.audio) if args.audio else bank_best_match(
+        profile.hash, taste_centroid(profile) if profile.positives else None
+    )[0]
     if not audio or not Path(audio).exists():
         _p(f"error: no audio for profile {profile.hash}. Run `vt generate` or pass --audio.")
         return 2

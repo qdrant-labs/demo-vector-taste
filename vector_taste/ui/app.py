@@ -115,7 +115,7 @@ def generate_route(req: TasteReq):
     from ..generate import generate
     from ..prompt import save as save_prompt
     from ..prompt import synthesize
-    from ..taste import TasteProfile, recommend
+    from ..taste import TasteProfile, recommend, taste_centroid
 
     profile = TasteProfile(req.positives, req.negatives, req.steer)
     if profile.is_empty():
@@ -126,7 +126,10 @@ def generate_route(req: TasteReq):
     save_prompt(profile.hash, synth)
     profile.save()
 
-    res = generate(synth.params, profile.hash)
+    # Pass the centroid so an unrehearsed taste falls back to the NEAREST banked track
+    # rather than silence. Every live gesture produces a new hash.
+    centroid = taste_centroid(profile) if profile.positives else None
+    res = generate(synth.params, profile.hash, centroid=centroid)
     return {
         "profile": profile.hash,
         "prompt": synth.params.prompt,
@@ -143,12 +146,15 @@ def generate_route(req: TasteReq):
 
 @app.post("/api/loop")
 def loop_route(req: TasteReq):
-    from ..generate import bank_lookup
+    from ..generate import bank_best_match
     from ..loop import close_loop
-    from ..taste import TasteProfile
+    from ..taste import TasteProfile, taste_centroid
 
     profile = TasteProfile(req.positives, req.negatives, req.steer)
-    audio = bank_lookup(profile.hash)
+    if not profile.positives:
+        raise HTTPException(400, "mark at least one positive first")
+    # Score the audio the user actually heard, including a nearest-match fallback.
+    audio, _ = bank_best_match(profile.hash, taste_centroid(profile))
     if not audio:
         raise HTTPException(404, "generate a track first")
     r = close_loop(audio, profile, upsert=True)

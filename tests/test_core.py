@@ -176,3 +176,50 @@ def test_caption_mentions_tags_and_bpm():
     t = Track("1", "A", "T", None, "Attribution", "u", tags=["jazz"], bpm=90, key="D")
     cap = t.caption
     assert "jazz" in cap and "90" in cap and "D" in cap
+
+
+# ------------------------------------------------------------------- bank fallback
+def test_bank_best_match_falls_back_to_nearest_taste(tmp_path, monkeypatch):
+    """An unrehearsed taste must return the closest banked track, never silence.
+
+    The bank is keyed by taste-profile hash, and every live gesture on stage produces a new
+    hash. Exact-match lookup would hand the presenter a silent file for any improvisation.
+    """
+    import json
+
+    import numpy as np
+
+    from vector_taste import generate as gen
+
+    monkeypatch.setattr(gen, "BANK", tmp_path)
+    monkeypatch.setattr(gen, "BANK_INDEX", tmp_path / "bank.json")
+
+    near = np.zeros(512, dtype=np.float32)
+    near[0] = 1.0
+    far = np.zeros(512, dtype=np.float32)
+    far[1] = 1.0
+    for name in ("near", "far"):
+        (tmp_path / f"{name}.wav").write_bytes(b"RIFF" + b"\0" * 2048)
+    (tmp_path / "bank.json").write_text(json.dumps({
+        "near": {"file": "near.wav", "centroid": near.tolist()},
+        "far": {"file": "far.wav", "centroid": far.tolist()},
+    }))
+
+    query = np.zeros(512, dtype=np.float32)
+    query[0] = 0.9
+    query[1] = 0.1
+    path, note = gen.bank_best_match("never-baked-hash", query)
+    assert path is not None and path.name == "near.wav"
+    assert "nearest banked taste" in note
+
+    # An exact hash hit must win outright and carry no fallback note.
+    path, note = gen.bank_best_match("near", query)
+    assert path.name == "near.wav" and note == ""
+
+
+def test_bank_best_match_without_centroid_is_exact_only():
+    """No centroid to compare against means no guessing — return nothing, not a wrong track."""
+    from vector_taste.generate import bank_best_match
+
+    path, note = bank_best_match("definitely-not-a-real-hash", None)
+    assert path is None and note == ""

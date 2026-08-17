@@ -33,9 +33,9 @@ def _fingerprint(hits) -> str:
 
 
 def rehearse(reset: bool = True, runs: int = 3) -> bool:
-    from .generate import bank_lookup
+    from .generate import bank_best_match
     from .loop import close_loop
-    from .taste import TasteProfile, diff, recommend
+    from .taste import TasteProfile, diff, recommend, taste_centroid
 
     ok = True
     print()
@@ -85,7 +85,12 @@ def rehearse(reset: bool = True, runs: int = 3) -> bool:
             ok = False
 
     # --- finale stability ---------------------------------------------------------
-    audio = bank_lookup(profile.hash)
+    # Nearest-match, not exact: rehearsal should exercise the same lookup the stage uses.
+    audio, match_note = bank_best_match(
+        profile.hash, taste_centroid(profile) if profile.positives else None
+    )
+    if match_note:
+        print(f"  info  bank served {match_note}")
     if not audio:
         print("  skip  finale               no banked audio (run `vt bake`)")
         print("  " + "-" * 76)

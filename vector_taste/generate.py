@@ -64,6 +64,7 @@ def _save_index(idx: dict) -> None:
 
 
 def bank_lookup(profile_hash: str) -> Path | None:
+    """Exact hash match only. Most callers want `bank_best_match` instead."""
     entry = _load_index().get(profile_hash)
     if not entry:
         return None
@@ -74,14 +75,61 @@ def bank_lookup(profile_hash: str) -> Path | None:
     return path
 
 
-def bank_add(profile_hash: str, audio: Path, params: GenerationParams, backend: str) -> Path:
-    """Register a generated file in the bank so it becomes the instant path next time."""
+def bank_best_match(profile_hash: str, centroid=None) -> tuple[Path | None, str]:
+    """Exact match if we have it, otherwise the banked taste closest to this one.
+
+    The bank is keyed by taste-profile hash, and a hash changes the moment anyone marks a
+    different track. On stage that is *every* interaction — improvising by ear is the whole
+    point — so exact-match lookup means the presenter gets silence for any gesture that was
+    not baked in advance.
+
+    Falling back to the nearest banked centroid means a live, unrehearsed taste still
+    produces musically relevant audio. Returns (path, note); the note is empty on an exact
+    hit and names the fallback otherwise, so it can be logged loudly and shown quietly.
+    """
+    exact = bank_lookup(profile_hash)
+    if exact:
+        return exact, ""
+
+    if centroid is None:
+        return None, ""
+
+    import numpy as np
+
+    best, best_score = None, -2.0
+    for h, entry in _load_index().items():
+        vec = entry.get("centroid")
+        path = BANK / entry["file"]
+        if not vec or not path.exists():
+            continue
+        score = float(np.dot(np.asarray(vec, dtype="float32"), centroid))
+        if score > best_score:
+            best, best_score = (path, h), score
+
+    if best is None:
+        return None, ""
+    path, matched_hash = best
+    return path, f"nearest banked taste {matched_hash} (cosine {best_score:.3f})"
+
+
+def bank_add(
+    profile_hash: str,
+    audio: Path,
+    params: GenerationParams,
+    backend: str,
+    centroid=None,
+) -> Path:
+    """Register a generated file in the bank so it becomes the instant path next time.
+
+    The centroid is stored so `bank_best_match` can serve an unrehearsed taste from the
+    nearest banked one. Without it the bank only answers gestures baked in advance.
+    """
     BANK.mkdir(parents=True, exist_ok=True)
     dest = BANK / f"{profile_hash}.wav"
     if audio.resolve() != dest.resolve():
         shutil.copy2(audio, dest)
     idx = _load_index()
-    idx[profile_hash] = {
+    entry = {
         "file": dest.name,
         "prompt": params.prompt,
         "bpm": params.bpm,
@@ -90,6 +138,14 @@ def bank_add(profile_hash: str, audio: Path, params: GenerationParams, backend: 
         "seed": params.seed,
         "backend": backend,
     }
+    if centroid is not None:
+        entry["centroid"] = [round(float(x), 6) for x in centroid]
+    else:
+        # Preserve a centroid recorded by an earlier bake rather than dropping it.
+        existing = idx.get(profile_hash, {}).get("centroid")
+        if existing:
+            entry["centroid"] = existing
+    idx[profile_hash] = entry
     _save_index(idx)
     return dest
 
@@ -169,25 +225,28 @@ def generate(
     reference_audio: Path | None = None,
     backend: str | None = None,
     out_dir: Path | None = None,
+    centroid=None,
 ) -> Generated:
-    """Generate, or return the banked track. Never raises for a missing backend."""
+    """Generate, or return the closest banked track. Never raises for a missing backend."""
     backend = backend or GEN_BACKEND
     out_dir = out_dir or BANK
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"{profile_hash}.wav"
 
     if backend == "bank":
-        banked = bank_lookup(profile_hash)
+        banked, note = bank_best_match(profile_hash, centroid)
         if banked:
-            return Generated(banked, "bank", params, from_bank=True)
+            if note:
+                log.warning("no exact bank entry for %s -- serving %s", profile_hash, note)
+            return Generated(banked, "bank", params, from_bank=True, note=note)
         return Generated(
             _placeholder(profile_hash, out_dir),
             "bank",
             params,
             from_bank=True,
             note=(
-                f"no bank entry for profile {profile_hash}; emitted silence. "
-                "Bake one with `vt bake`."
+                f"bank is empty for profile {profile_hash} and no centroid to match on. "
+                "Run `vt bake`."
             ),
         )
 
@@ -198,14 +257,18 @@ def generate(
             path = _generate_replicate(params, out)
         else:
             raise GenerationError(f"unknown GEN_BACKEND {backend!r}")
-        bank_add(profile_hash, path, params, backend)
+        bank_add(profile_hash, path, params, backend, centroid=centroid)
         return Generated(path, backend, params, from_bank=False)
     except Exception as exc:  # noqa: BLE001
-        # Loud in the logs, silent on screen.
+        # Loud in the logs, quiet on screen.
         log.error("generation backend %r failed: %s -- falling back to bank", backend, exc)
-        banked = bank_lookup(profile_hash)
+        banked, match_note = bank_best_match(profile_hash, centroid)
         if banked:
-            return Generated(banked, "bank", params, from_bank=True, note=f"{backend} failed: {exc}")
+            note = f"{backend} failed: {exc}"
+            return Generated(
+                banked, "bank", params, from_bank=True,
+                note=f"{note}; served {match_note}" if match_note else note,
+            )
         return Generated(
             _placeholder(profile_hash, out_dir),
             "bank",

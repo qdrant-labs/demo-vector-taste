@@ -24,7 +24,7 @@ from .generate import bank_add
 from .prompt import load as load_prompt
 from .prompt import save as save_prompt
 from .prompt import synthesize
-from .taste import TasteProfile, recommend
+from .taste import TasteProfile, recommend, taste_centroid
 from .timing import stage
 
 WORKER = ROOT / "scripts" / "acestep_bake_worker.py"
@@ -130,7 +130,12 @@ def bake_bank(
         if out.exists() and out.stat().st_size > 1024:
             synth = load_prompt(j["id"])
             if synth:
-                bank_add(j["id"], out, synth.params, backend)
+                # Record the centroid so live, unrehearsed tastes can match against it.
+                profile = TasteProfile.load(j["id"])
+                bank_add(
+                    j["id"], out, synth.params, backend,
+                    centroid=taste_centroid(profile) if profile.positives else None,
+                )
             baked += 1
         else:
             failed += 1

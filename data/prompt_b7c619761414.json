@@ -1,0 +1,53 @@
+{
+  "params": {
+    "prompt": "gentle solo piano, with instrumental, electronic production, acoustic folk, around 103 BPM, instrumental, no vocals",
+    "lyrics": "",
+    "audio_duration": 30.0,
+    "bpm": 103,
+    "keyscale": "A# major",
+    "timesignature": "4",
+    "num_inference_steps": 8,
+    "shift": 3.0,
+    "seed": 42,
+    "task_type": "text2music",
+    "audio_cover_strength": 0.7
+  },
+  "evidence": {
+    "n_hits": 10,
+    "tags": [
+      "instrumental",
+      "electronic",
+      "folk"
+    ],
+    "bpm_values": [
+      103,
+      136,
+      129,
+      96,
+      99,
+      129,
+      161,
+      99,
+      103,
+      99
+    ],
+    "keys": [
+      "E",
+      "A",
+      "A#",
+      "A#",
+      "B",
+      "D",
+      "F#",
+      "C",
+      "G",
+      "C#"
+    ],
+    "steer": "gentle solo piano",
+    "top_neighbors": [
+      "Jelsonic \u2014 Saying Goodbye In The Rain (piano)",
+      "Finn Anderson \u2014 A Dancer Stole My Heart",
+      "Jason Shaw \u2014 Timen Passing By"
+    ]
+  }
+}
