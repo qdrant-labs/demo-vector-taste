@@ -455,6 +455,11 @@ def main(argv=None) -> int:
     try:
         return args.func(args)
     except KeyboardInterrupt:
+        # Stop the ACE-Step child too. It is a separate process holding ~4GB, and leaving
+        # it resident after Ctrl+C would strand that memory.
+        from .progress import abort_current
+
+        abort_current()
         _p("\ninterrupted")
         return 130
     except FileNotFoundError as exc:

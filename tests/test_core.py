@@ -388,7 +388,7 @@ def test_fraction_mapping_is_monotonic_and_starts_at_zero():
 
 def test_progress_never_goes_backwards():
     """tqdm and the callback interleave; a late lower value would look like a stall."""
-    from vector_taste.worker import Progress
+    from vector_taste.progress import Progress
 
     p = Progress()
     p.update(frac=0.5)
@@ -399,8 +399,107 @@ def test_progress_never_goes_backwards():
 
 
 def test_progress_snapshot_reports_elapsed():
-    from vector_taste.worker import Progress
+    from vector_taste.progress import Progress
 
     snap = Progress().snapshot()
     assert snap["elapsed"] >= 0
     assert "started" not in snap          # internal, not part of the API
+
+
+# ---------------------------------------------------------------------------- aborting
+def test_abort_is_not_a_generic_failure():
+    """An abort must never be swallowed by the bank fallback.
+
+    Someone who pressed stop wants silence, not a pre-baked track they didn't ask for, so
+    GenerationAborted has to survive the `except Exception` that catches real failures.
+    """
+    from vector_taste.generate import GenerationAborted, GenerationError
+    from vector_taste.worker import WorkerAborted, WorkerError
+
+    assert issubclass(GenerationAborted, GenerationError)
+    assert issubclass(WorkerAborted, WorkerError)
+    # ...but distinguishable, which is what lets generate() re-raise only this one.
+    assert not isinstance(GenerationError("x"), GenerationAborted)
+
+
+def test_abort_with_no_worker_is_a_no_op():
+    """Pressing stop when nothing is generating must not spawn a worker or raise."""
+    from vector_taste.worker import AceStepWorker
+
+    before = AceStepWorker._instance
+    try:
+        AceStepWorker._instance = None
+        assert AceStepWorker.abort_current() is False
+    finally:
+        AceStepWorker._instance = before
+
+
+# ------------------------------------------------------------------------- elevenlabs
+def _gp(prompt="warm acoustic guitar, sombre folk, grand piano, around 112 BPM"):
+    from vector_taste.prompt import GenerationParams
+
+    return GenerationParams(prompt=prompt, seed=42, audio_duration=30.0)
+
+
+def test_negatives_that_contradict_the_positives_are_dropped():
+    """A rejected track shares traits with the accepted ones -- that is why it surfaced.
+
+    Passing those shared traits as negative_styles would tell the model to both want and
+    avoid the same thing. Measured in a real run before this filter existed: a taste built
+    on "acoustic guitar" was sending "acoustic guitar" as a negative.
+    """
+    from vector_taste.elevenlabs import _styles_from
+
+    pos, neg = _styles_from(_gp(), ["acoustic guitar", "heavily distorted and fuzzy"])
+    assert "heavily distorted and fuzzy" in neg      # genuinely contrasting, kept
+    assert not any("acoustic guitar" == n for n in neg)
+    assert not set(pos) & set(neg)
+
+
+def test_plan_always_asks_for_instrumental():
+    """force_instrumental is prompt-only, so plan mode has to say it in the chunk."""
+    from vector_taste.elevenlabs import build_plan
+
+    chunk = build_plan(_gp(), None)["chunks"][0]
+    assert chunk["text"] == "[Instrumental]"
+    assert "vocals" in chunk["negative_styles"]
+
+
+def test_conditioning_ref_only_when_a_reference_exists():
+    from vector_taste.elevenlabs import MAX_REF_MS, build_plan
+
+    assert "conditioning_ref" not in build_plan(_gp(), None)["chunks"][0]
+    chunk = build_plan(_gp(), "song123")["chunks"][0]
+    assert chunk["conditioning_ref"]["song_id"] == "song123"
+    # The API caps a reference at 30s; our segments sit exactly at that ceiling.
+    assert chunk["conditioning_ref"]["range"]["end_ms"] <= MAX_REF_MS
+    assert chunk["condition_strength"]
+
+
+def test_chunk_duration_is_clamped_to_api_bounds():
+    from vector_taste.elevenlabs import CHUNK_MAX_MS, CHUNK_MIN_MS, build_plan
+
+    short = _gp()
+    short.audio_duration = 0.5
+    long = _gp()
+    long.audio_duration = 9999
+    assert build_plan(short, None)["chunks"][0]["duration_ms"] == CHUNK_MIN_MS
+    assert build_plan(long, None)["chunks"][0]["duration_ms"] == CHUNK_MAX_MS
+
+
+def test_abort_registry_dispatches_to_whichever_backend_is_running():
+    """Abort used to kill the ACE-Step process directly, so Stop was a silent no-op on any
+    hosted backend. The registry is what makes it work everywhere."""
+    from vector_taste.progress import abort_current, register_aborter
+
+    register_aborter(None)
+    assert abort_current() is False          # nothing running
+
+    called = []
+    register_aborter(lambda: (called.append(1), True)[1])
+    assert abort_current() is True and called
+
+    # A failing aborter must not surface as a crash mid-demo.
+    register_aborter(lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert abort_current() is False
+    register_aborter(None)

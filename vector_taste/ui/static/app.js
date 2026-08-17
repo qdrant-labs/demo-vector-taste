@@ -112,6 +112,63 @@ audioEl.addEventListener("ended", () => { stopViz(); state.playing = null; syncT
 audioEl.addEventListener("pause", () => { stopViz(); syncTransport(); render(); });
 audioEl.addEventListener("play", () => { syncTransport(); render(); });
 
+/* ------------------------------------------------------------------- generator toggle */
+/* Which backend composes. Sent per-request, so switching takes effect on the NEXT compose
+   with no server restart.
+
+   Null until boot reads the server's GEN_BACKEND: the request ALWAYS carries a backend, so
+   defaulting to a guess here would silently override the stage config (GEN_BACKEND=bank)
+   with whatever this file happened to hardcode. */
+let backend = null;
+let backendsAvailable = {};
+
+const BACKEND_NOTE = {
+  bank: "generator: pre-baked bank (instant)",
+  local: "generator: Local ACE-Step (~2 min)",
+  elevenlabs: "generator: ElevenLabs (seconds)",
+};
+
+/* The header names the ACTIVE generator, so it has to be rebuilt whenever the toggle moves,
+   not only on the status poll. Kept in one place so switching never drops the worker note. */
+function syncStatus() {
+  const el = $("#status");
+  if (!el.dataset.base) return;                 // boot has not answered yet
+  const worker = backend === "bank" ? "" : (el.dataset.worker || "");
+  el.textContent = `${el.dataset.base} · ${backend}${worker}`;
+}
+
+function renderBackends() {
+  for (const b of document.querySelectorAll("#backends button")) {
+    const name = b.dataset.backend;
+    const ok = backendsAvailable[name] !== false;
+    b.disabled = !ok;
+    b.setAttribute("aria-checked", String(name === backend));
+    if (!ok) {
+      b.title = name === "elevenlabs"
+        ? "Set ELEVENLABS_API_KEY in .env.local to enable"
+        : "Not available on this machine";
+    }
+  }
+}
+
+function setBackend(name, quiet) {
+  if (backendsAvailable[name] === false) {
+    toast(name === "elevenlabs"
+      ? "ElevenLabs needs ELEVENLABS_API_KEY in .env.local" : `${name} is unavailable`, 5000);
+    return;
+  }
+  backend = name;
+  try { localStorage.setItem("vt-backend", name); } catch { /* private mode */ }
+  renderBackends();
+  if (!quiet) toast(BACKEND_NOTE[name] || `generator: ${name}`, 2500);
+  syncStatus();
+}
+
+document.querySelector("#backends").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-backend]");
+  if (b) setBackend(b.dataset.backend);
+});
+
 /* ------------------------------------------------------------------------- transport */
 const SKIP = 15;
 const fmtTime = (s) =>
@@ -264,7 +321,10 @@ async function api(path, body) {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!r.ok) throw new Error((await r.text()).slice(0, 160));
+  if (!r.ok) {
+    // Attach the status: callers need to tell an abort (499) from a real failure.
+    throw Object.assign(new Error((await r.text()).slice(0, 160)), { status: r.status });
+  }
   return r.json();
 }
 
@@ -321,6 +381,7 @@ function renderProgress(p) {
 
 function startComposeProgress() {
   $("#gen").disabled = true;
+  $("#abort").disabled = false;
   $("#acts").hidden = true;
   $("#progress").hidden = false;
   renderProgress({ frac: 0, phase: "starting", elapsed: 0 });
@@ -333,6 +394,22 @@ function startComposeProgress() {
   poll();
   composeTimer = setInterval(poll, 500);
 }
+
+/* ACE-Step cannot be cancelled cooperatively, so the server kills the worker. The model
+   reload it costs is started immediately in the background -- the header shows "warming
+   model" while you carry on marking tracks. */
+async function abortCompose() {
+  if (!composeTimer) return;                 // nothing in flight
+  $("#abort").disabled = true;
+  $("#progphase").textContent = "stopping…";
+  try {
+    const r = await fetch("/api/abort", { method: "POST" }).then((x) => x.json());
+    toast(r.aborted ? "stopped — reloading the model in the background"
+                    : "nothing was generating", 5000);
+  } catch (e) { toast("could not stop: " + e.message); }
+}
+
+$("#abort").onclick = abortCompose;
 
 function stopComposeProgress() {
   clearInterval(composeTimer);
@@ -350,7 +427,7 @@ async function compose() {
   try {
     const g = await api("/api/generate", {
       positives: [...state.pos.keys()], negatives: [...state.neg.keys()],
-      steer: $("#steer").value,
+      steer: $("#steer").value, backend,
     });
     let loop = null;
     try {
@@ -360,8 +437,13 @@ async function compose() {
       });
     } catch (e) { console.warn("loop failed", e); }
     showGenerated(g, loop);
-  } catch (e) { toast("compose failed: " + e.message, 8000); }
-  finally { stopComposeProgress(); }
+  } catch (e) {
+    // The server answers 499 when the user stopped it; that is not a failure.
+    if (e.status !== 499) toast("compose failed: " + e.message, 8000);
+  } finally {
+    stopComposeProgress();
+    boot();                                  // refresh the header: model is warming again
+  }
 }
 
 function showGenerated(g, loop) {
@@ -470,12 +552,23 @@ $("#clear").onclick = () => {
 document.addEventListener("keydown", (e) => {
   const typing = ["INPUT", "TEXTAREA"].includes(document.activeElement.tagName);
   if (e.key === "/" && !typing) { e.preventDefault(); $("#q").focus(); $("#q").select(); return; }
-  if (e.key === "Escape") { document.activeElement.blur(); return; }
+  if (e.key === "Escape") {
+    if (composeTimer) { abortCompose(); return; }
+    document.activeElement.blur();
+    return;
+  }
   if (typing) return;
 
   // Theme is handled before the "no results" guard below — otherwise it would be dead on
   // the empty state, which is exactly when someone first reaches for it.
   if (e.key === "t" || e.key === "T") { toggleTheme(); return; }
+  if (e.key === "b" || e.key === "B") {
+    // Cycle through the ones this server can actually do, so B never lands on a dead option.
+    const usable = [...document.querySelectorAll("#backends button")]
+      .map((b) => b.dataset.backend).filter((n) => backendsAvailable[n] !== false);
+    if (usable.length) setBackend(usable[(usable.indexOf(backend) + 1) % usable.length]);
+    return;
+  }
 
   const n = state.hits.length;
   if (!n) return;
@@ -513,12 +606,18 @@ document.addEventListener("keydown", (e) => {
 (async function boot() {
   try {
     const s = await fetch("/api/status").then((r) => r.json());
-    const worker = s.backend === "bank" ? "" :
+    backendsAvailable = s.backends || {};
+    let stored = null;
+    try { stored = localStorage.getItem("vt-backend"); } catch { /* private mode */ }
+    // A stored choice only survives if this server can still do it -- otherwise a key that
+    // has since been removed would make every Compose fail instead of falling back.
+    setBackend(backendsAvailable[stored] === true ? stored : (s.backend || "local"), true);
+    $("#status").dataset.worker =
       s.worker === "warming" ? " · warming model…"
       : s.worker === "ready" ? " · model ready"
       : s.worker === "unavailable" ? " · no generator" : "";
-    $("#status").textContent =
-      `${s.points.toLocaleString()} points · ${s.target} · ${s.backend}${worker}`;
+    $("#status").dataset.base = `${s.points.toLocaleString()} points · ${s.target}`;
+    syncStatus();
     // Poll while warming so the header flips to "model ready" on its own.
     if (s.worker === "warming") setTimeout(boot, 5000);
   } catch {

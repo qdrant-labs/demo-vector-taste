@@ -51,6 +51,9 @@ class TasteReq(BaseModel):
     # Speed/quality trade for live generation. 15s roughly halves the wait.
     duration: float = 30.0
     steps: int = 8
+    # Which generator to use for THIS compose. None -> the GEN_BACKEND default, so the
+    # toggle can change generator without restarting the server.
+    backend: str | None = None
     # Pin the seed to re-hear an exact take instead of composing a new one.
     reproducible: bool = False
 
@@ -87,18 +90,36 @@ def status():
         info = collection_info()
     except Exception as exc:
         raise HTTPException(503, f"Qdrant unavailable: {exc}") from exc
+    from ..generate import available_backends
+
     return {
         "points": info["points"],
         "target": "cloud" if is_cloud() else "local",
         "backend": GEN_BACKEND,
         "worker": worker_state(),
+        "backends": available_backends(),
     }
+
+
+@app.post("/api/abort")
+def abort():
+    """Stop the in-flight generation.
+
+    Dispatches through the abort registry rather than the ACE-Step worker, so it works on
+    whichever backend is actually running: ACE-Step kills its process, ElevenLabs closes its
+    HTTP client. Wiring this to the worker directly would make Stop silently do nothing on
+    a hosted backend.
+    """
+    from ..progress import abort_current
+
+    return {"aborted": abort_current()}
 
 
 @app.get("/api/progress")
 def progress():
     """Latest generation progress. Polled by the UI while a compose is in flight."""
-    from ..worker import PROGRESS, worker_state
+    from ..progress import PROGRESS
+    from ..worker import worker_state
 
     snap = PROGRESS.snapshot()
     snap["worker"] = worker_state()
@@ -174,7 +195,21 @@ def generate_route(req: TasteReq):
     # Pass the centroid so an unrehearsed taste falls back to the NEAREST banked track
     # rather than silence. Every live gesture produces a new hash.
     centroid = taste_centroid(profile) if profile.positives else None
-    res = generate(synth.params, profile.hash, centroid=centroid)
+    from ..generate import GenerationAborted
+
+    # Negative descriptors reach the model directly on backends with a negative prompt
+    # (ElevenLabs `negative_styles`); elsewhere they are ignored.
+    neg_desc = [
+        d for h in negative_hits(profile) for d in (h.payload.get("descriptors") or [])
+    ]
+    try:
+        res = generate(
+            synth.params, profile.hash, centroid=centroid,
+            backend=req.backend or None, negatives=neg_desc or None,
+        )
+    except GenerationAborted:
+        # 499 (client closed request) rather than 500: nothing failed, the user stopped it.
+        raise HTTPException(499, "generation aborted") from None
     return {
         "profile": profile.hash,
         "prompt": synth.params.prompt,
@@ -251,7 +286,9 @@ def generated(name: str):
     for root in (GENERATED, BANK):
         path = (root / name).resolve()
         if path.is_file() and root.resolve() in path.parents:
-            return FileResponse(path, media_type="audio/wav")
+            # ElevenLabs returns mp3, ACE-Step wav -- serve each as what it actually is.
+            media = "audio/mpeg" if path.suffix == ".mp3" else "audio/wav"
+            return FileResponse(path, media_type=media)
     raise HTTPException(404, "not found")
 
 

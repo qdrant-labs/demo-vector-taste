@@ -256,7 +256,23 @@ button.primary kbd {
   border: 0; background: none; color: var(--dim);
   padding: 0 0 0 4px; font-size: 1.1em; line-height: 1;
 }
-.acts { display: flex; gap: var(--s1); }
+.acts { display: flex; gap: var(--s1); align-items: center; }
+
+/* Segmented generator toggle. Selected state carries a filled background AND
+   aria-checked, so it is not conveyed by colour alone on a washed-out projector. */
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.seg button {
+  border: 0;
+  border-radius: 0;
+  padding: var(--s1) var(--s2);
+  font-size: 0.9em;
+  color: var(--dim);
+  white-space: nowrap;
+}
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-checked="true"] { background: var(--accent); color: #FFFFFF; font-weight: 600; }
+.seg button:disabled { opacity: 0.4; cursor: not-allowed; }
+.seg button:disabled:hover { background: transparent; }
 
 /* ------------------------------------------------------------------ progress ring */
 /* A ring, not a bar: `.bar` already means score/percentile in the Composed panel, and
@@ -276,6 +292,16 @@ button.primary kbd {
   stroke-dashoffset: 326.7;
   transition: stroke-dashoffset 0.4s ease;
 }
+/* Outline rather than filled: stopping is a destructive-ish action that shouldn't compete
+   with the red Compose CTA for attention, but must stay obvious under a spotlight. */
+button.danger {
+  margin-left: auto;
+  border-color: var(--neg);
+  color: var(--neg);
+}
+button.danger:hover { background: var(--neg); color: #0B0F19; border-color: var(--neg); }
+button.danger kbd { color: inherit; border-color: currentColor; }
+
 .progress-pct {
   font: 600 var(--fs-lg) var(--font-mono);
   letter-spacing: -0.5px;

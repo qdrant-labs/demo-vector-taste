@@ -64,6 +64,13 @@
   <div class="chips" id="chips"></div>
   <div class="acts" id="acts">
     <input id="steer" placeholder="steer the composition (optional)" aria-label="Steer">
+    <!-- Which generator composes. Options disable themselves when unavailable rather than
+         failing on click. -->
+    <div class="seg" id="backends" role="radiogroup" aria-label="Generator">
+      <button data-backend="bank" role="radio" aria-checked="false" title="Replay a pre-baked track (instant, offline) — the stage setting">Bank</button>
+      <button data-backend="local" role="radio" aria-checked="false" title="ACE-Step on this Mac (~2 min, offline)">Local</button>
+      <button data-backend="elevenlabs" role="radio" aria-checked="false" title="ElevenLabs Music (seconds, needs a key)">ElevenLabs</button>
+    </div>
     <button id="gen" class="primary">Compose <kbd>G</kbd></button>
     <button id="clear" class="ghost">Clear</button>
   </div>
@@ -80,6 +87,7 @@
       <div class="progress-phase" id="progphase">starting…</div>
       <div class="progress-note dim" id="prognote"></div>
     </div>
+    <button id="abort" class="danger" title="Stop generating (Esc)">Stop <kbd>Esc</kbd></button>
   </div>
 </section>
 
@@ -91,7 +99,7 @@
        <span class="neg">−</span> less like this — and watch the list move.</p>
     <p class="keys dim"><kbd>/</kbd> search · <kbd>↑↓</kbd> move · <kbd>space</kbd> play ·
        <kbd>←</kbd><kbd>→</kbd> ±15s · <kbd>+</kbd>/<kbd>−</kbd> mark · <kbd>G</kbd> compose ·
-       <kbd>T</kbd> theme</p>
+       <kbd>T</kbd> theme · <kbd>B</kbd> generator</p>
   </div>
 </main>
 

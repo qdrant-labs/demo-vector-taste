@@ -38,6 +38,14 @@ class GenerationError(RuntimeError):
     pass
 
 
+class GenerationAborted(GenerationError):
+    """The user stopped it. Deliberately NOT caught by the bank fallback below.
+
+    Falling back on an abort would hand back a pre-baked track nobody asked for, which is
+    the opposite of what pressing stop means.
+    """
+
+
 @dataclass
 class Generated:
     path: Path
@@ -120,7 +128,9 @@ def latest_generated(profile_hash: str) -> Path | None:
     if not GENERATED.exists():
         return None
     takes = sorted(
-        GENERATED.glob(f"{profile_hash}-*.wav"), key=lambda p: p.stat().st_mtime, reverse=True
+        (p for ext in ("wav", "mp3") for p in GENERATED.glob(f"{profile_hash}-*.{ext}")),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
     )
     return takes[0] if takes else None
 
@@ -175,6 +185,19 @@ def bank_add(
     return dest
 
 
+def available_backends() -> dict[str, bool]:
+    """Which backends can run, so the UI can disable rather than fail on click."""
+    from .elevenlabs import is_available as el_available
+    from .worker import is_available as local_available
+
+    return {
+        "bank": bool(_load_index()),
+        "local": local_available(),
+        "elevenlabs": el_available(),
+        "replicate": bool(os.getenv("REPLICATE_API_TOKEN")),
+    }
+
+
 def job_for(params: GenerationParams, profile_hash: str, out: Path,
             reference_audio: Path | None = None) -> dict:
     """Worker job dict. Shared by live generation and `vt bake` so they cannot diverge."""
@@ -201,13 +224,32 @@ def _generate_local(
     ACE-Step's API is task-based (/create_random_sample -> /query_result), so that path had
     never actually worked. Talking to our own worker is both simpler and under our control.
     """
-    from .worker import AceStepWorker, WorkerError
+    from .worker import AceStepWorker, WorkerAborted, WorkerError
 
     try:
         return AceStepWorker.get().generate(
             job_for(params, profile_hash, out, reference_audio)
         )
+    except WorkerAborted as exc:
+        raise GenerationAborted(str(exc)) from exc
     except WorkerError as exc:
+        raise GenerationError(str(exc)) from exc
+
+
+def _generate_elevenlabs(
+    params: GenerationParams,
+    reference_audio: Path | None,
+    out: Path,
+    negatives: list[str] | None = None,
+) -> Path:
+    """Hosted generation in seconds. Supports a real seed AND style conditioning."""
+    from .elevenlabs import ElevenLabsError, _Aborted, compose
+
+    try:
+        return compose(params, out, reference_audio, negatives)
+    except _Aborted as exc:
+        raise GenerationAborted("generation aborted") from exc
+    except ElevenLabsError as exc:
         raise GenerationError(str(exc)) from exc
 
 
@@ -243,6 +285,7 @@ def generate(
     backend: str | None = None,
     out_dir: Path | None = None,
     centroid=None,
+    negatives: list[str] | None = None,
 ) -> Generated:
     """Generate, or return the closest banked track. Never raises for a missing backend."""
     backend = backend or GEN_BACKEND
@@ -251,8 +294,12 @@ def generate(
     # overwriting one with the other.
     out_dir = out_dir or (BANK if backend == "bank" else GENERATED)
     out_dir.mkdir(parents=True, exist_ok=True)
+    # ElevenLabs returns mp3; naming those .wav would be a lie that breaks the media type
+    # and confuses anything that sniffs by extension.
+    ext = "mp3" if backend == "elevenlabs" else "wav"
     out = out_dir / (
-        f"{profile_hash}.wav" if backend == "bank" else f"{profile_hash}-{params.seed}.wav"
+        f"{profile_hash}.wav" if backend == "bank"
+        else f"{profile_hash}-{params.seed}.{ext}"
     )
 
     if backend == "bank":
@@ -275,6 +322,8 @@ def generate(
     try:
         if backend in ("local", "modal"):
             path = _generate_local(params, reference_audio, out, profile_hash)
+        elif backend == "elevenlabs":
+            path = _generate_elevenlabs(params, reference_audio, out, negatives)
         elif backend == "replicate":
             path = _generate_replicate(params, out)
         else:
@@ -283,6 +332,10 @@ def generate(
         # by `vt bake`; if every live compose registered itself there, the next lookup would
         # find it and start replaying old takes -- the exact behaviour being fixed.
         return Generated(path, backend, params, from_bank=False)
+    except GenerationAborted:
+        # Propagate past the bank fallback below: an abort is a deliberate user action, not
+        # a failure to paper over with a pre-baked track.
+        raise
     except Exception as exc:  # noqa: BLE001
         # Loud in the logs, quiet on screen.
         log.error("generation backend %r failed: %s -- falling back to bank", backend, exc)

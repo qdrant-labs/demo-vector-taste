@@ -96,12 +96,42 @@ def check_offline():
     problems = []
     if is_cloud():
         problems.append("QDRANT_URL points at Cloud")
-    if os.getenv("GEN_BACKEND") in ("replicate", "modal"):
+    if os.getenv("GEN_BACKEND") in ("replicate", "modal", "elevenlabs"):
         problems.append(f"GEN_BACKEND={os.getenv('GEN_BACKEND')} needs network")
     if problems:
         return _row(WARN, "offline safety", "; ".join(problems),
                     "for stage: unset QDRANT_URL/API_KEY, GEN_BACKEND=bank")
     return _row(OK, "offline safety", "all demo-path components are local")
+
+
+def check_elevenlabs():
+    """Only meaningful when this backend is actually selected.
+
+    A key that is present but rejected is the failure worth catching early: it surfaces as a
+    401 mid-compose otherwise.
+    """
+    from .elevenlabs import api_key
+
+    if os.getenv("GEN_BACKEND") != "elevenlabs":
+        return _row(OK, "elevenlabs", "not selected"
+                    + (" (key present)" if api_key() else ""))
+    if not api_key():
+        return _row(FAIL, "elevenlabs", "ELEVENLABS_API_KEY not set",
+                    "add it to .env.local, or set GEN_BACKEND=local")
+
+    import httpx
+
+    try:
+        r = httpx.get(
+            "https://api.elevenlabs.io/v1/user/subscription",
+            headers={"xi-api-key": api_key()}, timeout=15,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _row(WARN, "elevenlabs", f"could not reach the API ({exc})")
+    if r.status_code != 200:
+        return _row(FAIL, "elevenlabs", f"key rejected (HTTP {r.status_code})",
+                    "check ELEVENLABS_API_KEY")
+    return _row(OK, "elevenlabs", f"tier {r.json().get('tier', '?')}")
 
 
 def check_audio_output():
@@ -141,6 +171,7 @@ CHECKS = [
     check_bank,
     check_profiles,
     check_offline,
+    check_elevenlabs,
     check_port,
     check_audio_output,
 ]
