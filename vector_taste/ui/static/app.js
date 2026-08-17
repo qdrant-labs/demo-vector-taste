@@ -59,8 +59,16 @@ function drawEq() {
   const gap = 2;
   const bw = (w - gap * (nBars - 1)) / nBars;
   const style = getComputedStyle(document.body);
-  const accent = style.getPropertyValue("--accent").trim() || "#38bdf8";
-  const dim = style.getPropertyValue("--line").trim() || "#262d36";
+  const accent = style.getPropertyValue("--accent").trim() || "#DC244C";
+  const violet = style.getPropertyValue("--violet").trim() || "#6047FF";
+  const dim = style.getPropertyValue("--line").trim() || "#4E5366";
+
+  /* Qdrant's signature red-to-violet gradient across the frequency axis. The brand
+     reserves this gradient for hero moments; a live spectrum of the music being searched
+     is the one place in this UI that qualifies. */
+  const grad = g.createLinearGradient(0, 0, w, 0);
+  grad.addColorStop(0, accent);
+  grad.addColorStop(1, violet);
 
   for (let i = 0; i < nBars; i++) {
     const lo = Math.floor(Math.pow(i / nBars, 2) * bins.length);
@@ -68,7 +76,7 @@ function drawEq() {
     let peak = 0;
     for (let j = lo; j < hi && j < bins.length; j++) peak = Math.max(peak, bins[j]);
     const bh = Math.max(2, (peak / 255) * (h - 4));
-    g.fillStyle = peak > 8 ? accent : dim;
+    g.fillStyle = peak > 8 ? grad : dim;
     g.globalAlpha = peak > 8 ? 0.55 + (peak / 255) * 0.45 : 1;
     g.fillRect(i * (bw + gap), h - bh, bw, bh);
   }
@@ -116,9 +124,19 @@ function tagFor(h) {
   return "";
 }
 
+/* Marks are stored by point_id — the specific 10s chunk that surfaced, which is what the
+   API needs (one vector per gesture). But the chunk that wins can change between a search
+   and the recommend that follows it, so matching the DISPLAY state on point_id alone makes
+   a track you just marked render as unmarked. Match on segment for display. */
+const markedSegments = (map) => new Set([...map.values()].map((h) => h.segment_id));
+
+function isMarked(map, h) {
+  return map.has(h.point_id) || markedSegments(map).has(h.segment_id);
+}
+
 function rowHtml(h, i, dropped) {
-  const isPos = state.pos.has(h.point_id);
-  const isNeg = state.neg.has(h.point_id);
+  const isPos = isMarked(state.pos, h);
+  const isNeg = isMarked(state.neg, h);
   const cls = [
     "row",
     dropped ? "dropped" : "",
@@ -169,6 +187,14 @@ const chip = (h, kind) => `<span class="chip ${kind}">
 
 const esc = (s) => String(s ?? "").replace(/[<>&"]/g, (c) =>
   ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
+
+/* "72nd", not "72th". This number is the last thing the audience reads. */
+function ordinal(n) {
+  const i = Math.round(n);
+  const mod100 = i % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${i}th`;
+  return `${i}${["th", "st", "nd", "rd"][i % 10] || "th"}`;
+}
 
 function toast(msg, ms = 3200) {
   const t = $("#toast");
@@ -244,7 +270,7 @@ function showGenerated(g, loop) {
     <div id="genbody">
       ${banner}
       ${pct !== null ? `
-      <div class="bigstat">${pct.toFixed(0)}<span class="unit">th percentile</span></div>
+      <div class="bigstat">${ordinal(pct).replace(/([a-z]+)$/, '<span class="unit">$1</span>')}<span class="unit"> percentile</span></div>
       <div class="dim">closer to your taste than ${pct.toFixed(0)}% of ${loop.population} segments</div>
       <div class="bar"><i style="width:${Math.max(1, pct)}%"></i></div>
       <div class="bar baseline"><i style="width:${Math.max(1, loop.baseline_percentile)}%"></i></div>
@@ -254,8 +280,8 @@ function showGenerated(g, loop) {
       </div>` : `<div class="dim">score unavailable</div>`}
       <dl class="kv">
         <dt>prompt</dt><dd>${esc(g.prompt)}</dd>
-        <dt>bpm / key</dt><dd>${g.bpm ?? "—"} · ${esc(g.keyscale ?? "—")}</dd>
-        <dt>backend</dt><dd>${esc(g.backend)}${g.from_bank ? " (pre-baked)" : ""}</dd>
+        <dt>bpm / key</dt><dd class="mono">${g.bpm ?? "—"} · ${esc(g.keyscale ?? "—")}</dd>
+        <dt>backend</dt><dd class="mono">${esc(g.backend)}${g.from_bank ? " (pre-baked)" : ""}</dd>
         <dt>style ref</dt><dd>${g.reference ? esc(g.reference.artist + " — " + g.reference.title) : "—"}</dd>
       </dl>
       <audio controls src="${g.audio_url}" id="genaudio"></audio>
@@ -268,13 +294,27 @@ function showGenerated(g, loop) {
 }
 
 /* ------------------------------------------------------------------------ interaction */
+/* Remove any entry for this hit's SEGMENT, whichever chunk it was stored under.
+   Returns true if something was removed, so the caller can treat a second click as a
+   toggle-off rather than stacking a near-duplicate vector onto the taste profile. */
+function unmarkSegment(map, hit) {
+  let removed = false;
+  for (const [id, h] of [...map]) {
+    if (id === hit.point_id || h.segment_id === hit.segment_id) {
+      map.delete(id);
+      removed = true;
+    }
+  }
+  return removed;
+}
+
 function mark(pointId, kind) {
   const hit = state.hits.find((h) => h.point_id === pointId)
     || [...state.pos.values(), ...state.neg.values()].find((h) => h.point_id === pointId);
   if (!hit) return;
   const [add, other] = kind === "pos" ? [state.pos, state.neg] : [state.neg, state.pos];
-  other.delete(pointId);                       // a result is either + or −, never both
-  if (add.has(pointId)) add.delete(pointId); else add.set(pointId, hit);
+  unmarkSegment(other, hit);                   // a result is either + or −, never both
+  if (!unmarkSegment(add, hit)) add.set(pointId, hit);
   render();
   refreshTaste();
 }
@@ -296,6 +336,19 @@ $("#chips").addEventListener("click", (e) => {
   render(); refreshTaste();
 });
 
+/* ------------------------------------------------------------------------------ theme */
+/* Dark is the brand default. The initial value is set in <head> before first paint;
+   this only handles toggling and persistence. */
+function toggleTheme() {
+  const root = document.documentElement;
+  const next = root.dataset.theme === "light" ? "dark" : "light";
+  root.dataset.theme = next;
+  try { localStorage.setItem("vt-theme", next); } catch { /* private mode */ }
+  toast(`${next} theme`, 1200);
+}
+
+$("#theme").onclick = toggleTheme;
+
 $("#go").onclick = doSearch;
 $("#q").addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
 $("#gen").onclick = compose;
@@ -309,6 +362,10 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "/" && !typing) { e.preventDefault(); $("#q").focus(); $("#q").select(); return; }
   if (e.key === "Escape") { document.activeElement.blur(); return; }
   if (typing) return;
+
+  // Theme is handled before the "no results" guard below — otherwise it would be dead on
+  // the empty state, which is exactly when someone first reaches for it.
+  if (e.key === "t" || e.key === "T") { toggleTheme(); return; }
 
   const n = state.hits.length;
   if (!n) return;

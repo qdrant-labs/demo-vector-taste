@@ -26,6 +26,14 @@ from .taste import TasteProfile, percentile_against_centroid, recommend, taste_c
 _NS = uuid.UUID("5f3d9a1e-0001-4000-8000-000000000000")
 
 
+def ordinal(n: float) -> str:
+    """72 -> '72nd'. This number is the last thing the audience reads."""
+    i = int(round(n))
+    if 11 <= i % 100 <= 13:
+        return f"{i}th"
+    return f"{i}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(i % 10, 'th') }"
+
+
 @dataclass
 class LoopResult:
     cosine: float
@@ -49,7 +57,7 @@ class LoopResult:
         return "\n".join(
             [
                 "",
-                f"  The generated track lands at the {self.percentile:.0f}th percentile.",
+                f"  The generated track lands at the {ordinal(self.percentile)} percentile.",
                 f"  Closer to your taste centroid than {self.percentile:.0f}% of the "
                 f"{self.population} segments in the library.",
                 "",

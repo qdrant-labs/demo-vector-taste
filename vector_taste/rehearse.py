@@ -103,7 +103,9 @@ def rehearse(reset: bool = True, runs: int = 3) -> bool:
         numbers.append(round(res.percentile, 4))
 
     if len(set(numbers)) == 1:
-        print(f"  ok    finale stability     {numbers[0]:.1f}th percentile on all {runs} runs")
+        # No ordinal suffix here: this is a one-decimal figure, and "77.2th" reads worse
+        # than either "77.2" or "77th".
+        print(f"  ok    finale stability     percentile {numbers[0]:.1f} on all {runs} runs")
     else:
         print(f"  FAIL  finale DRIFTED across runs: {numbers}")
         print("        generated points are polluting the population")

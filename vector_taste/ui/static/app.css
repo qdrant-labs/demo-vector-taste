@@ -1,168 +1,363 @@
-/* Dark, large type, projector-first.
-   Font sizes have a floor sized for the back of a room, not for a laptop screen.
-   Every state that uses colour also carries a text or shape marker — a projector can
-   wash out colour completely, and some of the audience will not distinguish red/green. */
+/* Vector Taste — Qdrant design system.
+ *
+ * Dark-first, per the brand. Two constraints shape the deviations from a normal web UI:
+ *
+ * 1. This gets projected. Type is larger than the brand's marketing scale (brand ratios,
+ *    weights, colours and 8px grid are followed; absolute sizes are not), and every state
+ *    that uses colour also carries a text marker — a projector washes colour out, and some
+ *    of the audience will not distinguish red from green.
+ * 2. It must run with no network. Fonts are self-hosted, never imported from a CDN.
+ */
 
+/* ---------------------------------------------------------------- fonts (self-hosted) */
+/* Unmodified upstream variable fonts. SIL Open Font License 1.1 — see fonts/OFL-*.txt.
+   Plain format('woff2'); the 'woff2-variations' form is legacy. */
+@font-face {
+  font-family: 'Mona Sans';
+  font-style: normal;
+  font-weight: 200 900;          /* Mona Sans' wght axis starts at 200, not 100 */
+  font-display: swap;
+  src: url('/static/fonts/MonaSansVF.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/static/fonts/GeistMono.woff2') format('woff2');
+}
+
+/* ---------------------------------------------------------------------------- tokens */
 :root {
-  --bg: #0b0d10;
-  --panel: #14181d;
-  --panel-2: #1b2027;
-  --line: #262d36;
-  --fg: #eef2f6;
-  --dim: #93a1b0;
-  --accent: #38bdf8;
-  --pos: #4ade80;
-  --neg: #fb7185;
-  --warn: #fbbf24;
+  /* Qdrant brand — dark theme (default) */
+  --bg: #0B0F19;               /* neutral/950 */
+  --panel: #111824;            /* paper-elevation-1 */
+  --panel-2: #141A2A;          /* paper-elevation-2 */
+  --panel-8: #212635;          /* paper-elevation-8 */
+  --line: #4E5366;             /* neutral/700 */
+  --fg: #F0F3FA;               /* text/primary */
+  --dim: #656B7F;              /* text/secondary */
 
+  --accent: #DC244C;           /* primary/500 — Qdrant Red. CTAs and key highlights only. */
+  --accent-hover: #CC1845;
+  --violet: #6047FF;           /* secondary/500 */
+
+  /* Semantic roles.
+     Red is the CTA colour, so it is deliberately NOT reused for "reject" — two meanings on
+     one colour in the same view is worse than a slightly unexpected hue. */
+  --pos: #009688;              /* teal/500   — more like this */
+  --neg: #FF9800;              /* orange/500 — less like this */
+  --info: #03A9F4;             /* lightBlue/500 — moved up */
+
+  --logo-dark: block;
+  --logo-light: none;
+
+  --font-sans: 'Mona Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* Projector-scaled. Brand ratios, larger absolutes — the back row has to read this. */
   --fs-base: clamp(16px, 1.15vw, 21px);
   --fs-lg: clamp(20px, 1.7vw, 30px);
   --fs-xl: clamp(30px, 3.6vw, 62px);
-  --radius: 10px;
+
+  /* 8px grid */
+  --s1: 8px;  --s2: 16px; --s3: 24px; --s4: 32px; --s5: 40px; --s8: 64px;
+  --radius: 8px;
+  --radius-lg: 16px;
+  --maxw: 1110px;              /* brand max content width */
+}
+
+[data-theme='light'] {
+  --bg: #FFFFFF;
+  --panel: #F7F8FA;            /* paper-elevation-0 */
+  --panel-2: #F0F2F7;
+  --panel-8: #FFFFFF;
+  --line: #D3D9EB;             /* neutral/200 */
+  --fg: #0B0F19;
+  --dim: #656B7F;              /* secondary text is the same in both themes */
+  /* Qdrant Red is unchanged across themes — it is always the accent. */
+  --logo-dark: none;
+  --logo-light: block;
 }
 
 * { box-sizing: border-box; }
 
 body {
-  margin: 0;
+  margin: 0 auto;
+  max-width: var(--maxw);
   background: var(--bg);
   color: var(--fg);
-  font: var(--fs-base)/1.5 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
-  padding: 1.2rem clamp(1rem, 3vw, 3rem) 3rem;
+  font: 400 var(--fs-base)/1.5 var(--font-sans);
+  /* Mona Sans has an opsz axis browsers apply automatically, which subtly reshapes
+     headings at different sizes. Off keeps one consistent look. */
+  font-optical-sizing: none;
+  padding: var(--s3) clamp(var(--s2), 3vw, var(--s5)) var(--s8);
   -webkit-font-smoothing: antialiased;
 }
 
-header { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
-h1 { font-size: var(--fs-lg); margin: 0; letter-spacing: -0.02em; font-weight: 650; }
-h1 .dim { color: var(--accent); }
-.dim { color: var(--dim); }
-.status { margin-left: auto; color: var(--dim); font-size: 0.85em; font-variant-numeric: tabular-nums; }
+/* ---------------------------------------------------------------------------- header */
+header {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  padding-bottom: var(--s2);
+}
+.brand { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+.brand img { height: 28px; width: auto; display: block; }
+.brand .logo-dark { display: var(--logo-dark); }
+.brand .logo-light { display: var(--logo-light); }
+.brand .divider { width: 1px; height: 24px; background: var(--line); }
 
-/* ---------------------------------------------------------------- search */
-.searchbar { display: flex; gap: .6rem; margin: 1rem 0; }
+h1 {
+  font-size: var(--fs-lg);
+  font-weight: 600;                /* brand: headings are SemiBold */
+  letter-spacing: -0.5px;          /* brand: negative tracking, "engineered feel" */
+  margin: 0;
+  white-space: nowrap;
+}
+h1 .accent { color: var(--accent); }
+
+.status {
+  margin-left: auto;
+  color: var(--dim);
+  font: 400 0.8em/1.5 var(--font-mono);
+}
+.dim { color: var(--dim); }
+
+/* ---------------------------------------------------------------------------- inputs */
+.searchbar { display: flex; gap: var(--s1); margin: var(--s2) 0 var(--s3); }
 input[type=search], .acts input {
   flex: 1; min-width: 0;
-  background: var(--panel); color: var(--fg);
-  border: 1px solid var(--line); border-radius: var(--radius);
-  padding: .8rem 1rem; font-size: 1em; font-family: inherit;
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s2);
+  font: 400 1em var(--font-sans);
 }
-input:focus-visible, button:focus-visible, .row:focus-visible {
-  outline: 3px solid var(--accent); outline-offset: 2px;
-}
+input::placeholder { color: var(--dim); }
+
 button {
-  background: var(--panel-2); color: var(--fg);
-  border: 1px solid var(--line); border-radius: var(--radius);
-  padding: .8rem 1.2rem; font-size: 1em; font-family: inherit; cursor: pointer;
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s2) var(--s3);
+  font: 600 1em var(--font-sans);
+  cursor: pointer;
+  white-space: nowrap;
 }
-button:hover { background: #232a33; }
-button.primary { background: var(--accent); color: #04202b; border-color: var(--accent); font-weight: 650; }
-button.ghost { background: transparent; color: var(--dim); }
-kbd {
-  font: inherit; font-size: .8em; border: 1px solid var(--line);
-  border-bottom-width: 2px; border-radius: 5px; padding: 0 .35em; color: var(--dim);
+button:hover { background: var(--panel-2); border-color: var(--dim); }
+button.primary {
+  background: var(--accent);
+  color: #FFFFFF;                  /* white on red in both themes, per brand */
+  border-color: var(--accent);
+}
+button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+button.ghost { border-color: transparent; color: var(--dim); }
+button.ghost:hover { color: var(--fg); }
+button:disabled { opacity: 0.5; cursor: default; }
+
+/* Qdrant Red focus ring: reads on both themes and survives a projector. */
+input:focus-visible, button:focus-visible, .row:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
 }
 
-/* ------------------------------------------------------------ equalizer */
+kbd {
+  font: 400 0.8em var(--font-mono);
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 1px 6px;
+  color: var(--dim);
+}
+/* On the red CTA a dim-grey kbd reads as an empty box. */
+button.primary kbd {
+  color: #FFFFFF;
+  border-color: rgba(255, 255, 255, 0.55);
+}
+
+/* ------------------------------------------------------------------------ equalizer */
 .viz {
-  background: var(--panel); border: 1px solid var(--line);
-  border-radius: var(--radius); padding: .5rem .8rem; margin-bottom: 1rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s1) var(--s2);
+  margin-bottom: var(--s2);
 }
 #eq { width: 100%; height: 90px; display: block; }
-.viz-label { display: flex; gap: .8rem; font-size: .85em; margin-top: .2rem; }
+.viz-label {
+  display: flex; gap: var(--s1);
+  font: 400 0.85em var(--font-mono);
+  margin-top: var(--s1);
+}
 .viz-label .dim { margin-left: auto; }
 
-/* ---------------------------------------------------------------- taste */
+/* ---------------------------------------------------------------------------- taste */
 .taste {
-  background: var(--panel); border: 1px solid var(--line);
-  border-radius: var(--radius); padding: .8rem; margin-bottom: 1rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s3);
+  margin-bottom: var(--s2);
 }
-.chips { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .6rem; }
+.chips { display: flex; flex-wrap: wrap; gap: var(--s1); margin-bottom: var(--s2); }
+
+/* Brand pill: full radius, 4px 12px, 14px text */
 .chip {
-  display: inline-flex; align-items: center; gap: .45rem;
-  border: 1px solid var(--line); border-radius: 999px;
-  padding: .3rem .8rem; font-size: .85em; background: var(--panel-2);
+  display: inline-flex; align-items: center; gap: var(--s1);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 14px;
 }
 .chip.pos { border-color: var(--pos); }
 .chip.neg { border-color: var(--neg); }
-.chip .sign { font-weight: 700; }
+.chip .sign { font-weight: 600; }
 .chip.pos .sign { color: var(--pos); }
 .chip.neg .sign { color: var(--neg); }
-.chip button { border: 0; background: none; color: var(--dim); padding: 0 0 0 .2rem; font-size: 1.1em; }
-.acts { display: flex; gap: .6rem; }
+.chip button {
+  border: 0; background: none; color: var(--dim);
+  padding: 0 0 0 4px; font-size: 1.1em; line-height: 1;
+}
+.acts { display: flex; gap: var(--s1); }
 
-/* -------------------------------------------------------------- results */
-.results { display: flex; flex-direction: column; gap: .4rem; }
+/* -------------------------------------------------------------------------- results */
+.results { display: flex; flex-direction: column; gap: var(--s1); }
 .row {
   display: grid;
   grid-template-columns: 2.6rem 1fr auto auto;
-  align-items: center; gap: .9rem;
-  background: var(--panel); border: 1px solid var(--line);
-  border-left-width: 4px; border-left-color: transparent;
-  border-radius: var(--radius); padding: .7rem .9rem;
+  align-items: center;
+  gap: var(--s2);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 4px solid transparent;
+  border-radius: var(--radius);
+  padding: var(--s2);
   cursor: pointer;
 }
-.row:hover { background: var(--panel-2); }
-.row[aria-current="true"] { border-color: var(--accent); background: var(--panel-2); }
+.row:hover { background: var(--panel-2); border-color: var(--dim); border-left-color: var(--dim); }
+.row[aria-current="true"] { background: var(--panel-2); border-color: var(--accent); }
 .row.playing { border-left-color: var(--accent); }
 .row.is-pos { border-left-color: var(--pos); }
-.row.is-neg { border-left-color: var(--neg); opacity: .58; }
+.row.is-neg { border-left-color: var(--neg); opacity: 0.58; }
 
-.rank { color: var(--dim); font-variant-numeric: tabular-nums; text-align: right; }
+.rank { color: var(--dim); font-family: var(--font-mono); text-align: right; }
 .meta { min-width: 0; }
 .name { font-size: 1.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sub { color: var(--dim); font-size: .8em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.score { font-variant-numeric: tabular-nums; color: var(--dim); font-size: .9em; }
-.mark { display: flex; gap: .3rem; }
-.mark button { padding: .35rem .7rem; font-size: .95em; line-height: 1; }
-.mark button.on-pos { background: var(--pos); color: #04220f; border-color: var(--pos); }
-.mark button.on-neg { background: var(--neg); color: #2b0710; border-color: var(--neg); }
+.sub {
+  color: var(--dim);
+  font: 400 0.8em var(--font-mono);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.score { font: 400 0.9em var(--font-mono); color: var(--dim); }
+.mark { display: flex; gap: 4px; }
+.mark button { padding: 6px 12px; font-size: 0.95em; line-height: 1; }
+.mark button.on-pos { background: var(--pos); border-color: var(--pos); color: #FFFFFF; }
+.mark button.on-neg { background: var(--neg); border-color: var(--neg); color: #0B0F19; }
 
-/* Diff markers. Text label first so the meaning survives without colour. */
-.tag { font-size: .72em; padding: .1rem .5rem; border-radius: 4px; border: 1px solid; white-space: nowrap; }
+/* Diff markers. The text label carries the meaning; colour only reinforces it. */
+.tag {
+  font: 600 0.72em var(--font-mono);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid;
+  white-space: nowrap;
+}
 .tag.new { color: var(--pos); border-color: var(--pos); }
-.tag.up { color: var(--accent); border-color: var(--accent); }
-.tag.down { color: var(--warn); border-color: var(--warn); }
-.row.dropped { opacity: .4; border-style: dashed; }
+.tag.up { color: var(--info); border-color: var(--info); }
+.tag.down { color: var(--neg); border-color: var(--neg); }
+.row.dropped { opacity: 0.4; border-style: dashed; }
 .row.dropped .name { text-decoration: line-through; }
 
-.empty { padding: 3rem 1rem; text-align: center; }
-.empty p { margin: .4rem 0; font-size: 1.05em; }
-.empty .pos { color: var(--pos); font-weight: 700; }
-.empty .neg { color: var(--neg); font-weight: 700; }
-.keys { margin-top: 1.6rem !important; font-size: .85em !important; }
+.empty { padding: var(--s8) var(--s2); text-align: center; }
+.empty p { margin: var(--s1) 0; font-size: 1.05em; }
+.empty .pos { color: var(--pos); font-weight: 600; }
+.empty .neg { color: var(--neg); font-weight: 600; }
+.keys { margin-top: var(--s4) !important; font-size: 0.85em !important; }
 
-/* ------------------------------------------------------------- generated */
+/* ------------------------------------------------------------------------ generated */
 .result-panel {
-  margin-top: 1.4rem; background: var(--panel);
-  border: 1px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.2rem;
+  margin-top: var(--s3);
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-lg);
+  padding: var(--s3);
 }
-.genhead { display: flex; align-items: center; gap: 1rem; }
-.genhead h2 { margin: 0; font-size: var(--fs-lg); }
+.genhead { display: flex; align-items: center; gap: var(--s2); }
+.genhead h2 {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  letter-spacing: -0.5px;
+}
 .genhead button { margin-left: auto; }
-.bigstat { font-size: var(--fs-xl); font-weight: 700; line-height: 1.05; letter-spacing: -0.03em; }
-.bigstat .unit { font-size: .42em; color: var(--dim); font-weight: 500; }
-.kv { display: grid; grid-template-columns: max-content 1fr; gap: .3rem 1rem; margin: .8rem 0; font-size: .92em; }
+
+/* The closing number. Red because it is the single key highlight of the whole demo —
+   never a gradient, which the brand forbids on type. */
+.bigstat {
+  font: 700 var(--fs-xl)/1.05 var(--font-mono);
+  letter-spacing: -1.8px;
+  color: var(--accent);
+  margin-top: var(--s2);
+}
+.bigstat .unit {
+  font-size: 0.42em;
+  font-weight: 400;
+  color: var(--dim);
+  letter-spacing: 0;
+}
+.kv {
+  display: grid; grid-template-columns: max-content 1fr;
+  gap: var(--s1) var(--s2);
+  margin: var(--s2) 0;
+  font-size: 0.92em;
+}
 .kv dt { color: var(--dim); }
 .kv dd { margin: 0; }
-.bar { height: 12px; background: var(--panel-2); border-radius: 6px; overflow: hidden; margin: .3rem 0 .1rem; }
+.kv dd.mono { font-family: var(--font-mono); }
+
+.bar {
+  height: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+  margin: var(--s1) 0 4px;
+}
 .bar > i { display: block; height: 100%; background: var(--accent); }
 .bar.baseline > i { background: var(--dim); }
+
 .banner {
-  border: 1px solid var(--warn); color: var(--warn);
-  border-radius: var(--radius); padding: .5rem .8rem; margin: .6rem 0; font-size: .85em;
+  border: 1px solid var(--neg);
+  color: var(--neg);
+  border-radius: var(--radius);
+  padding: var(--s1) var(--s2);
+  margin: var(--s1) 0;
+  font-size: 0.85em;
 }
 
 .toast {
-  position: fixed; left: 50%; bottom: 1.4rem; transform: translateX(-50%);
-  background: var(--panel-2); border: 1px solid var(--line);
-  border-radius: var(--radius); padding: .7rem 1.2rem; z-index: 10;
+  position: fixed; left: 50%; bottom: var(--s3);
+  transform: translateX(-50%);
+  background: var(--panel-8);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s2) var(--s3);
+  z-index: 10;
 }
-audio { width: 100%; margin-top: .5rem; }
+audio { width: 100%; margin-top: var(--s1); }
 
+/* ---------------------------------------------------------------------- responsive */
 @media (max-width: 640px) {
-  .row { grid-template-columns: 1.8rem 1fr auto; gap: .5rem; }
+  .row { grid-template-columns: 1.8rem 1fr auto; gap: var(--s1); }
   .row .score { display: none; }
   .acts { flex-wrap: wrap; }
+  .brand .divider, h1 { display: none; }   /* logo alone carries it on narrow screens */
+  .status { margin-left: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {

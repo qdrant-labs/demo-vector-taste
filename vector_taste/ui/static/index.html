@@ -1,15 +1,42 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Vector Taste</title>
+<title>Vector Taste — Qdrant</title>
+<meta name="description" content="Search a music library by sound, refine by ear, co-create new tracks.">
+
+<!-- Theme applied before first paint. Without this the page flashes the default theme on
+     load, which on a dark stage means a full-screen white flash. -->
+<script>
+  try {
+    var t = localStorage.getItem('vt-theme');
+    if (!t) t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    document.documentElement.dataset.theme = t;
+  } catch (e) { /* private mode: fall through to the dark default on <html> */ }
+</script>
+
+<!-- Qdrant publishes no full-colour SVG favicon, so the brandmark serves as one. -->
+<link rel="icon" type="image/svg+xml" href="/static/img/qdrant-brandmark-red.svg">
+
+<!-- crossorigin is required even same-origin, or the browser fetches each font twice. -->
+<link rel="preload" as="font" type="font/woff2" href="/static/fonts/MonaSansVF.woff2" crossorigin>
+<link rel="preload" as="font" type="font/woff2" href="/static/fonts/GeistMono.woff2" crossorigin>
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
 <header>
-  <h1>Vector<span class="dim">Taste</span></h1>
+  <div class="brand">
+    <!-- Both lockups ship and swap by CSS on the theme, so there is no flash and no JS
+         rewriting src. Official files, never recreated in code. -->
+    <img class="logo-dark" src="/static/img/qdrant-logo-red-white.svg" alt="Qdrant">
+    <img class="logo-light" src="/static/img/qdrant-logo-red-black.svg" alt="Qdrant">
+    <span class="divider" aria-hidden="true"></span>
+    <h1>Vector<span class="accent">Taste</span></h1>
+  </div>
   <div class="status" id="status" role="status" aria-live="polite">connecting…</div>
+  <button id="theme" class="ghost" aria-label="Toggle light and dark theme"
+          title="Toggle theme (T)">Theme <kbd>T</kbd></button>
 </header>
 
 <section class="searchbar">
@@ -29,7 +56,7 @@
   <div class="chips" id="chips"></div>
   <div class="acts">
     <input id="steer" placeholder="steer the composition (optional)" aria-label="Steer">
-    <button id="gen">Compose <kbd>G</kbd></button>
+    <button id="gen" class="primary">Compose <kbd>G</kbd></button>
     <button id="clear" class="ghost">Clear</button>
   </div>
 </section>
@@ -41,7 +68,7 @@
     <p class="dim">Then mark results <span class="pos">+</span> more like this,
        <span class="neg">−</span> less like this — and watch the list move.</p>
     <p class="keys dim"><kbd>/</kbd> search · <kbd>↑↓</kbd> move · <kbd>space</kbd> play ·
-       <kbd>+</kbd>/<kbd>−</kbd> mark · <kbd>G</kbd> compose</p>
+       <kbd>+</kbd>/<kbd>−</kbd> mark · <kbd>G</kbd> compose · <kbd>T</kbd> theme</p>
   </div>
 </main>
 
