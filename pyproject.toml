@@ -1,0 +1,49 @@
+[project]
+name = "vector-taste"
+version = "0.1.0"
+description = "Search a music library by sound, refine by ear, co-create with AI. Qdrant + CLAP + ACE-Step."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.12,<3.13"
+
+# Pinned with upper bounds on purpose: transformers v5 already changed the CLAP
+# return type once (get_audio_features now returns an object, not a tensor), and
+# qdrant-client 1.16 removed .search()/.recommend()/.discover() outright.
+# An unbounded range means this repo breaks silently for someone cloning it later.
+dependencies = [
+    "qdrant-client>=1.19,<2",
+    "transformers>=5,<6",
+    "torch>=2.5,<3",
+    "torchaudio>=2.5,<3",
+    "librosa>=0.10,<1",
+    "soundfile>=0.12,<1",
+    "numpy>=1.26,<3",
+    "pandas>=2.2,<3",
+    "pyarrow>=16,<22",
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.30,<1",
+    "python-dotenv>=1.0,<2",
+    "httpx>=0.27,<1",
+    "tqdm>=4.66,<5",
+]
+
+[project.optional-dependencies]
+# Optional hosted embedder. Never required; CLAP is the default path.
+marengo = ["twelvelabs>=0.4,<1"]
+# Optional hosted generation backend.
+replicate = ["replicate>=0.34,<2"]
+dev = ["pytest>=8,<9", "ruff>=0.6,<1"]
+
+[project.scripts]
+vt = "vector_taste.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["vector_taste"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

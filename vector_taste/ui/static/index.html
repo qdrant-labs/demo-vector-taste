@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vector Taste</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header>
+  <h1>Vector<span class="dim">Taste</span></h1>
+  <div class="status" id="status" role="status" aria-live="polite">connecting…</div>
+</header>
+
+<section class="searchbar">
+  <input id="q" type="search" placeholder="Describe a sound —  &ldquo;dreamy lo-fi with vinyl crackle&rdquo;"
+         autocomplete="off" aria-label="Search by sound">
+  <button id="go" class="primary">Search</button>
+</section>
+
+<!-- Spectrum analyzer on whatever is playing. Doubles as proof audio is actually
+     reaching the output device, which is the thing that silently kills a music demo. -->
+<section class="viz" id="viz" hidden>
+  <canvas id="eq" height="90" aria-hidden="true"></canvas>
+  <div class="viz-label"><span id="nowplaying">—</span><span class="dim" id="eqnote"></span></div>
+</section>
+
+<section class="taste" id="tastebar" hidden>
+  <div class="chips" id="chips"></div>
+  <div class="acts">
+    <input id="steer" placeholder="steer the composition (optional)" aria-label="Steer">
+    <button id="gen">Compose <kbd>G</kbd></button>
+    <button id="clear" class="ghost">Clear</button>
+  </div>
+</section>
+
+<main>
+  <div id="results" class="results"></div>
+  <div id="empty" class="empty">
+    <p>Search by <strong>sound</strong>, not tags.</p>
+    <p class="dim">Then mark results <span class="pos">+</span> more like this,
+       <span class="neg">−</span> less like this — and watch the list move.</p>
+    <p class="keys dim"><kbd>/</kbd> search · <kbd>↑↓</kbd> move · <kbd>space</kbd> play ·
+       <kbd>+</kbd>/<kbd>−</kbd> mark · <kbd>G</kbd> compose</p>
+  </div>
+</main>
+
+<section class="result-panel" id="genpanel" hidden>
+  <div class="genhead">
+    <h2>Composed</h2>
+    <button id="closegen" class="ghost">Close</button>
+  </div>
+  <div id="genbody"></div>
+</section>
+
+<div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

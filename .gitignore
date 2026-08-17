@@ -1,0 +1,32 @@
+# secrets — first entry, before .env.example exists, because this repo is public
+.env
+.env.local
+*.key
+
+# corpus audio and models are fetched, never committed
+audio/
+models/
+qdrant_storage/
+cache/
+raw/
+
+# generated artifacts
+timings.jsonl
+*.wav
+*.mp3
+*.flac
+!tests/fixtures/*.wav
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/

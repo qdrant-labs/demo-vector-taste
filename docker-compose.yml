@@ -1,0 +1,19 @@
+# Alternative to scripts/qdrant_up.sh for people who prefer Compose.
+# Works with `docker compose up -d` or `podman-compose up -d`.
+# Version is pinned deliberately — see the comment in scripts/qdrant_up.sh.
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.19.0
+    container_name: vector-taste-qdrant
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+      - "6334:6334"
+    volumes:
+      - ./qdrant_storage:/qdrant/storage
+    restart: unless-stopped
+    healthcheck:
+      # Qdrant images ship no curl/wget, so probe the port from bash instead.
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333' 2>/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
