@@ -11,7 +11,7 @@ import shutil
 import socket
 from pathlib import Path
 
-from .config import AUDIO, BANK, CLAP_MODEL, COLLECTION, DATA, get_client, is_cloud
+from .config import AUDIO, CLAP_MODEL, COLLECTION, DATA, get_client, is_cloud
 
 OK, WARN, FAIL, SKIP = "PASS", "WARN", "FAIL", "SKIP"
 
@@ -55,7 +55,7 @@ def check_models():
     if (hub / slug).exists():
         return _row(OK, "clap model", f"cached: {CLAP_MODEL}")
     return _row(FAIL, "clap model", "not in local cache",
-                f"run once online: uv run vt search --text test")
+                "run once online: uv run vt search --text test")
 
 
 def check_audio_files():
@@ -129,7 +129,7 @@ def check_port(port: int = 8000):
     with socket.socket() as s:
         s.settimeout(0.5)
         if s.connect_ex(("127.0.0.1", port)) == 0:
-            return _row(WARN, "ui port", f"{port} already in use", f"kill it or use --port")
+            return _row(WARN, "ui port", f"{port} already in use", "kill it or use --port")
     return _row(OK, "ui port", f"{port} free")
 
 

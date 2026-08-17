@@ -61,7 +61,7 @@ def status():
 
     try:
         info = collection_info()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise HTTPException(503, f"Qdrant unavailable: {exc}") from exc
     return {
         "points": info["points"],

@@ -155,11 +155,98 @@ here (ND makes a style-referenced generation legally awkward, SA propagates onto
 blocks a company-published repo). Licence strings are free text with dozens of spellings, so
 `corpus.is_permissive()` is deny-list-first and rejects anything unrecognized.
 
+## 12. ACE-Step on an M4 Air: measured
+
+No published Apple Silicon benchmark for ACE-Step 1.5 exists, so here is one.
+
+**M4 MacBook Air, 16GB unified memory, 2B turbo DiT + 0.6B LM, MLX backend, 8 steps,
+30-second instrumental:**
+
+| Component | Time (s) | % of wall |
+|---|---|---|
+| Diffusion (8 steps) | 69.5 | 36.7% |
+| VAE decode | 33.0 | 17.5% |
+| Model offload | 49.6 | 26.2% |
+| **DiT pipeline total** | **102.6** | **54.2%** |
+| Overhead (I/O, audio save) | 86.6 | 45.8% |
+| **TOTAL WALL TIME** | **189.2** | 100% |
+
+**~3.2 minutes for 30 seconds of audio.** Live generation on stage is not viable — the
+threshold for that was ~45s.
+
+The per-step breakdown is the interesting part:
+
+```
+step 1: 48.72 s/it     <- MLX graph compilation
+step 2: 14 s
+steps 3-8: ~1-2 s/it
+```
+
+So the cost is almost entirely **one-time**: graph compilation plus model offload. A warm,
+resident server amortizes both, which is why the `local` backend talks to a long-running
+ACE-Step API rather than spawning a process per request. It also means **baking the bank
+locally is practical** — no rented GPU required.
+
+Two caveats on this measurement: corpus ingest was running concurrently, so it is a
+pessimistic figure; and the first attempt auto-selected the **1.7B** language model rather
+than the 0.6B the docs recommend for Apple Silicon, which thrashed swap for 13 minutes
+without producing anything. Force `acestep-5Hz-lm-0.6B` on a 16GB machine.
+
+## 13. The recommended CLAP checkpoint is degenerate on this corpus
+
+The most consequential finding of the build, and it reverses a published benchmark.
+
+`laion/larger_clap_music` is the obvious choice for a music demo: it is the music-only
+checkpoint, and LAION's own table gives it **GTZAN 71%** zero-shot versus 51% for the
+music+speech variant. We shipped it, ingested 1,005 tracks with it, and every text query
+returned **the same top three results in the same order** — "aggressive loud distorted
+metal" and "solo classical piano" were indistinguishable.
+
+Measured, zero-shot text-to-audio genre classification on 32 tracks from this corpus:
+
+| Checkpoint | Accuracy | Chance | Mean pairwise audio cosine |
+|---|---|---|---|
+| **`laion/larger_clap_general`** | **0.75** | 0.25 | **0.305** |
+| `laion/clap-htsat-unfused` | 0.41 | 0.25 | 0.548 |
+| `laion/larger_clap_music` | **0.25** | 0.25 | **0.922** |
+
+**The music checkpoint sits exactly at chance.** The diagnostic number is the right-hand
+column: mean pairwise cosine between *different* tracks is **0.92**, and two unrelated songs
+embed at **0.9869**. The encoder has collapsed — it emits nearly the same vector for
+everything, so there is no ranking signal for any query to exploit.
+
+Things that were ruled out before blaming the checkpoint:
+
+- **Not a loading bug.** `output_loading_info` reports no missing, unexpected, or
+  mismatched keys.
+- **Not the audio pipeline.** Files load at sensible RMS (~0.17), chunk into 3x10s as
+  expected, and embedding is bit-identical across runs (cosine 1.000000).
+- **Not normalization.** All vectors are unit length; text and audio both.
+- **Not fixable by centering.** The audio mean vector has norm **0.96** (i.e. the whole
+  corpus points one direction). Mean-centering triples the score spread, from 0.010 to
+  0.037, but accuracy stays at chance — it redistributes noise rather than recovering
+  signal.
+
+**Lesson:** a published benchmark on someone else's dataset did not survive contact with
+ours, and the failure was silent — plausible-looking ranked lists with plausible-looking
+scores, all meaningless. `scripts/eval_embedders.py` makes this a one-command check, and
+`mean pairwise cosine > 0.8` is the tripwire: it catches encoder collapse without needing
+labels at all.
+
+Worth noting the original research flagged this exact risk in advance — the HF checkpoint's
+provenance is undocumented, and the advice was to benchmark both on our own data before
+committing. That advice was correct and the answer was the opposite of the recommendation.
+
 ## Still open
 
-- **ACE-Step throughput on an M4 Air.** No published M-series benchmark exists. Our first
-  attempt auto-selected the **1.7B** language model (not the 0.6B the docs recommend for
-  Apple Silicon) and thrashed swap for 13 minutes without producing a track, while corpus
-  extraction competed for I/O. Being re-measured in isolation with the 0.6B model.
 - **Whether TwelveLabs Marengo's text tower is aligned to its audio tower.** Bedrock's own
   migration example passes `embeddingOption: "visual"` for text input.
+
+## A note on CLAP score magnitudes
+
+Cosine similarities from CLAP are compressed — real text-to-audio matches score around
+**0.02-0.05**, not 0.6. Ranking is meaningful; the absolute number is not.
+
+This is why the closing metric is a **percentile against the corpus** rather than a raw
+cosine. "Cosine 0.024" tells an audience nothing and looks identical whether the demo
+worked or not. "Closer to your taste than 94% of the library" is legible and falsifiable.

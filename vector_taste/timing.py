@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import time
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .config import TIMINGS
 
@@ -21,14 +21,14 @@ def stage(name: str, **meta):
     error = None
     try:
         yield meta
-    except Exception as exc:  # noqa: BLE001 - we re-raise; this only annotates the record
+    except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
         raise
     finally:
         record = {
             "stage": name,
             "seconds": round(time.perf_counter() - t0, 3),
-            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "at": datetime.now(UTC).isoformat(timespec="seconds"),
             **meta,
         }
         if error:

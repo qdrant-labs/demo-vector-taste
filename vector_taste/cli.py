@@ -8,11 +8,10 @@ needed and stdlib means one less dependency to pin.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
-from .config import BANK, COLLECTION, DATA, GEN_BACKEND, is_cloud
+from .config import COLLECTION, DATA, GEN_BACKEND, is_cloud
 
 
 def _p(*a):

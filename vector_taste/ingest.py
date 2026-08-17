@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 
 from . import corpus, store
-from .config import AUDIO, CHUNK_SEC, DATA, ROOT, SEGMENT_SEC
+from .config import CHUNK_SEC, DATA, ROOT, SEGMENT_SEC
 from .embed import embed_chunks, load_audio
 from .timing import stage
 

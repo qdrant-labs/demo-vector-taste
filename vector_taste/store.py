@@ -58,7 +58,7 @@ def ensure_collection(recreate: bool = False) -> None:
     for field, schema in INDEXES.items():
         try:
             client.create_payload_index(COLLECTION, field, field_schema=schema)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             if "already exists" not in str(exc).lower():
                 raise
 

@@ -1,0 +1,119 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --extra dev
+
+      # These cover the licence filter, chunking, centroid, diff and prompt
+      # synthesis. No model download and no Qdrant needed, so CI stays fast.
+      - name: Tests
+        run: uv run pytest -q
+
+      - name: Lint
+        run: uv run ruff check vector_taste tests
+
+      # A public repo that ships a licence filter should prove the filter works
+      # on every push, not just when someone remembers to run it.
+      - name: Licence filter rejects NC/SA/ND
+        run: |
+          uv run python - <<'PY'
+          from vector_taste.corpus import is_permissive
+          must_reject = [
+              "Attribution-NonCommercial-ShareAlike 3.0 International",
+              "Attribution-NonCommercial-NoDerivatives (aka Music Sharing) 3.0 International",
+              "Attribution-ShareAlike",
+              "Attribution-NoDerivatives 4.0 International",
+              "", None,
+          ]
+          must_allow = ["CC0 1.0 Universal", "Attribution", "Public Domain Mark 1.0"]
+          bad = [x for x in must_reject if is_permissive(x)]
+          missed = [x for x in must_allow if not is_permissive(x)]
+          assert not bad, f"wrongly allowed: {bad}"
+          assert not missed, f"wrongly rejected: {missed}"
+          print("licence filter ok")
+          PY
+
+  qdrant:
+    runs-on: ubuntu-latest
+    services:
+      qdrant:
+        # Pinned to match scripts/qdrant_up.sh — search behaviour is version-dependent.
+        image: qdrant/qdrant:v1.19.0
+        ports: ["6333:6333"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+
+      # Guards the two things most likely to break silently: the collection schema
+      # (named vectors + the payload indexes Qdrant Cloud requires) and the fact
+      # that grouping composes with RecommendQuery/DiscoverQuery.
+      - name: Collection schema and grouped recommend/discover
+        env:
+          QDRANT_URL: http://localhost:6333
+        run: |
+          uv run python - <<'PY'
+          import numpy as np
+          from qdrant_client import models
+          from vector_taste import store
+          from vector_taste.config import COLLECTION, get_client
+
+          store.ensure_collection(recreate=True)
+          c = get_client()
+
+          have = set(c.get_collection(COLLECTION).payload_schema or {})
+          missing = set(store.INDEXES) - have
+          assert not missing, f"missing payload indexes (Qdrant Cloud would 400): {missing}"
+
+          rng = np.random.default_rng(0)
+          unit = lambda: (lambda v: v / np.linalg.norm(v))(rng.normal(size=512).astype("float32"))
+          pts = [
+              store.make_point(
+                  f"{s}{ch}".zfill(8) + "-0000-0000-0000-000000000000",
+                  unit(),
+                  {"segment_id": f"seg{s}", "track_id": "t", "artist": "a",
+                   "tags": ["x"], "bpm": 120, "is_generated": False},
+                  text_vec=unit() if ch == 0 else None,
+              )
+              for s in range(3) for ch in range(3)
+          ]
+          store.upsert_points(pts)
+          ids = [p.id for p in pts]
+          sp = models.SearchParams(exact=True)
+
+          r = c.query_points_groups(
+              COLLECTION,
+              query=models.RecommendQuery(recommend=models.RecommendInput(
+                  positive=[ids[0]], negative=[ids[6]],
+                  strategy=models.RecommendStrategy.BEST_SCORE)),
+              using="audio", group_by="segment_id", limit=5, search_params=sp)
+          assert r.groups, "grouped recommend returned nothing"
+          assert not hasattr(r.groups[0], "score"), "PointGroup gained .score; use hits[0].score"
+
+          d = c.query_points_groups(
+              COLLECTION,
+              query=models.DiscoverQuery(discover=models.DiscoverInput(
+                  target=ids[0],
+                  context=[models.ContextPair(positive=ids[3], negative=ids[6])])),
+              using="audio", group_by="segment_id", limit=5, search_params=sp)
+          assert d.groups, "grouped discover returned nothing"
+
+          info = c.get_collection(COLLECTION)
+          print(f"ok: {info.points_count} points, indexed_vectors={info.indexed_vectors_count}")
+          PY

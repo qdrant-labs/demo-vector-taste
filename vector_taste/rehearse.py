@@ -33,8 +33,8 @@ def _fingerprint(hits) -> str:
 
 
 def rehearse(reset: bool = True, runs: int = 3) -> bool:
-    from .loop import close_loop
     from .generate import bank_lookup
+    from .loop import close_loop
     from .taste import TasteProfile, diff, recommend
 
     ok = True
@@ -48,7 +48,7 @@ def rehearse(reset: bool = True, runs: int = 3) -> bool:
 
     # --- search determinism -------------------------------------------------------
     prints = []
-    for r in range(runs):
+    for _ in range(runs):
         run_fp = []
         for q in DEMO_QUERIES:
             with stage("rehearse.search", query=q):
@@ -59,7 +59,7 @@ def rehearse(reset: bool = True, runs: int = 3) -> bool:
     if all(p == prints[0] for p in prints):
         print(f"  ok    search determinism   identical across {runs} runs")
     else:
-        print(f"  FAIL  search determinism   results changed between runs")
+        print("  FAIL  search determinism   results changed between runs")
         ok = False
 
     # --- taste refinement ---------------------------------------------------------
@@ -92,7 +92,7 @@ def rehearse(reset: bool = True, runs: int = 3) -> bool:
         return ok
 
     numbers = []
-    for r in range(runs):
+    for _ in range(runs):
         with stage("rehearse.loop"):
             res = close_loop(audio, profile, upsert=True)
         numbers.append(round(res.percentile, 4))

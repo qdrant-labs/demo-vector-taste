@@ -30,8 +30,8 @@ FMA_METADATA_URL = "https://os.unil.cloud.switch.ch/fma/fma_metadata.zip"
 FMA_SMALL_URL = "https://os.unil.cloud.switch.ch/fma/fma_small.zip"
 
 # Order matters: deny wins over allow.
-_DENY = re.compile(r"non-?commercial|share.?alike|no.?deriv|sampling", re.I)
-_ALLOW = re.compile(r"\b(cc0|public\s?domain|attribution)\b", re.I)
+_DENY = re.compile(r"non-?commercial|share.?alike|no.?deriv|sampling", re.IGNORECASE)
+_ALLOW = re.compile(r"\b(cc0|public\s?domain|attribution)\b", re.IGNORECASE)
 
 
 def is_permissive(license_str: str | None) -> bool:
@@ -119,7 +119,7 @@ def load_fma_metadata(limit: int | None = None, subset: str = "small") -> list[d
         next(reader)  # third row is a units/dtype row, not data
 
         def col(group: str, name: str) -> int:
-            for i, (a, b) in enumerate(zip(h1, h2)):
+            for i, (a, b) in enumerate(zip(h1, h2, strict=False)):
                 if a == group and b == name:
                     return i
             raise KeyError(f"({group},{name}) not in tracks.csv")
@@ -127,7 +127,6 @@ def load_fma_metadata(limit: int | None = None, subset: str = "small") -> list[d
         c_lic, c_sub = col("track", "license"), col("set", "subset")
         c_artist, c_title = col("artist", "name"), col("track", "title")
         c_gtop = col("track", "genre_top")
-        c_tags = col("track", "tags")
 
         out: list[dict] = []
         for row in reader:

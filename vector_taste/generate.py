@@ -143,7 +143,7 @@ def _generate_replicate(params: GenerationParams, out: Path) -> Path:
     if not os.getenv("REPLICATE_API_TOKEN"):
         raise GenerationError("REPLICATE_API_TOKEN is not set")
     try:
-        import replicate  # noqa: PLC0415
+        import replicate
     except ImportError as exc:
         raise GenerationError("pip install 'vector-taste[replicate]'") from exc
 
