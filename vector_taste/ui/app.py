@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from ..config import BANK, GEN_BACKEND, ROOT, is_cloud
+from ..config import BANK, GEN_BACKEND, GENERATED, ROOT, is_cloud
 from ..search import Hit, by_text, format_table  # noqa: F401
 
 STATIC = Path(__file__).parent / "static"
@@ -51,6 +51,8 @@ class TasteReq(BaseModel):
     # Speed/quality trade for live generation. 15s roughly halves the wait.
     duration: float = 30.0
     steps: int = 8
+    # Pin the seed to re-hear an exact take instead of composing a new one.
+    reproducible: bool = False
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -109,15 +111,17 @@ def taste(req: TasteReq):
             "moved": {h.segment_id: [old, new] for h, old, new in d.moved},
             "changed": d.changed,
         }
-    profile.save()
+    # Deliberately NOT saved here. Every +/- gesture hits this route, and persisting each
+    # one litters data/ with profiles that `vt bake` would then try to bake. Profiles are
+    # saved on compose, where the prompt cache and bank actually need them.
     return payload
 
 
 @app.post("/api/generate")
 def generate_route(req: TasteReq):
     from ..generate import generate
+    from ..prompt import fresh_seed, seed_from_hash, synthesize
     from ..prompt import save as save_prompt
-    from ..prompt import seed_from_hash, synthesize
     from ..taste import TasteProfile, negative_hits, recommend, taste_centroid
 
     profile = TasteProfile(req.positives, req.negatives, req.steer)
@@ -127,7 +131,11 @@ def generate_route(req: TasteReq):
     hits = recommend(profile, limit=10)
     synth = synthesize(
         hits, steer=req.steer, duration=req.duration,
-        negatives=negative_hits(profile), seed=seed_from_hash(profile.hash),
+        # Fresh seed every compose: the prompt is deterministic (the same taste
+        # describes the same music) but the seed is not, so each press of Compose
+        # is a NEW performance of that description rather than a replay.
+        negatives=negative_hits(profile),
+        seed=seed_from_hash(profile.hash) if req.reproducible else fresh_seed(),
         steps=req.steps,
     )
     save_prompt(profile.hash, synth)
@@ -153,7 +161,7 @@ def generate_route(req: TasteReq):
 
 @app.post("/api/loop")
 def loop_route(req: TasteReq):
-    from ..generate import bank_best_match
+    from ..generate import audio_for_profile
     from ..loop import close_loop
     from ..taste import TasteProfile, taste_centroid
 
@@ -161,7 +169,7 @@ def loop_route(req: TasteReq):
     if not profile.positives:
         raise HTTPException(400, "mark at least one positive first")
     # Score the audio the user actually heard, including a nearest-match fallback.
-    audio, _ = bank_best_match(profile.hash, taste_centroid(profile))
+    audio, _ = audio_for_profile(profile.hash, taste_centroid(profile))
     if not audio:
         raise HTTPException(404, "generate a track first")
     r = close_loop(audio, profile, upsert=True)
@@ -209,10 +217,12 @@ def audio(segment_id: str):
 
 @app.get("/generated/{name}")
 def generated(name: str):
-    path = (BANK / name).resolve()
-    if not path.is_file() or BANK.resolve() not in path.parents:
-        raise HTTPException(404, "not found")
-    return FileResponse(path, media_type="audio/wav")
+    """Serve a generated take, or a banked one. Both dirs, never outside them."""
+    for root in (GENERATED, BANK):
+        path = (root / name).resolve()
+        if path.is_file() and root.resolve() in path.parents:
+            return FileResponse(path, media_type="audio/wav")
+    raise HTTPException(404, "not found")
 
 
 if STATIC.exists():

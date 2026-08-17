@@ -26,7 +26,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import BANK, GEN_BACKEND
+from .config import BANK, GEN_BACKEND, GENERATED
 from .prompt import GenerationParams
 
 log = logging.getLogger("vector_taste.generate")
@@ -109,6 +109,32 @@ def bank_best_match(profile_hash: str, centroid=None) -> tuple[Path | None, str]
         return None, ""
     path, matched_hash = best
     return path, f"nearest banked taste {matched_hash} (cosine {best_score:.3f})"
+
+
+def latest_generated(profile_hash: str) -> Path | None:
+    """Most recent live generation for a taste, or None.
+
+    Live output is named `<hash>-<seed>.wav` and never enters the bank, so this is how the
+    loop and the UI find the take the user just heard rather than a pre-baked one.
+    """
+    if not GENERATED.exists():
+        return None
+    takes = sorted(
+        GENERATED.glob(f"{profile_hash}-*.wav"), key=lambda p: p.stat().st_mtime, reverse=True
+    )
+    return takes[0] if takes else None
+
+
+def audio_for_profile(profile_hash: str, centroid=None) -> tuple[Path | None, str]:
+    """The audio a user most recently heard for this taste.
+
+    Freshly generated takes win over the bank: the bank is the stage fallback, not the
+    source of truth while exploring.
+    """
+    live = latest_generated(profile_hash)
+    if live:
+        return live, ""
+    return bank_best_match(profile_hash, centroid)
 
 
 def bank_add(
@@ -220,9 +246,14 @@ def generate(
 ) -> Generated:
     """Generate, or return the closest banked track. Never raises for a missing backend."""
     backend = backend or GEN_BACKEND
-    out_dir = out_dir or BANK
+    # Live output goes to generated/, NOT the curated bank. Each compose is a new file
+    # named by its seed, so composing the same taste twice keeps both takes rather than
+    # overwriting one with the other.
+    out_dir = out_dir or (BANK if backend == "bank" else GENERATED)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / f"{profile_hash}.wav"
+    out = out_dir / (
+        f"{profile_hash}.wav" if backend == "bank" else f"{profile_hash}-{params.seed}.wav"
+    )
 
     if backend == "bank":
         banked, note = bank_best_match(profile_hash, centroid)
@@ -248,7 +279,9 @@ def generate(
             path = _generate_replicate(params, out)
         else:
             raise GenerationError(f"unknown GEN_BACKEND {backend!r}")
-        bank_add(profile_hash, path, params, backend, centroid=centroid)
+        # Deliberately NOT written into the bank. The bank is a curated stage asset built
+        # by `vt bake`; if every live compose registered itself there, the next lookup would
+        # find it and start replaying old takes -- the exact behaviour being fixed.
         return Generated(path, backend, params, from_bank=False)
     except Exception as exc:  # noqa: BLE001
         # Loud in the logs, quiet on screen.

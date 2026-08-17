@@ -38,3 +38,7 @@ venv/
 .idea/
 .vscode/
 .acestep
+
+# Live generations: one file per take, regenerated on demand. The curated bank/ is
+# committed; these are not.
+generated/

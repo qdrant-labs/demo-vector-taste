@@ -304,3 +304,50 @@ def test_top_descriptors_picks_per_category():
     got = top_descriptors(scores, per_category=1)
     assert len(got) == len(VOCAB)
     assert len({FLAT[FLAT.index((c, t))][0] for c, t in FLAT if t in got}) == len(VOCAB)
+
+
+# ------------------------------------------------------------------ fresh generation
+def test_fresh_seed_differs_between_calls():
+    """Composing twice must give two different takes, not a replay of the first."""
+    from vector_taste.prompt import SEED_MAX, fresh_seed
+
+    seeds = {fresh_seed() for _ in range(20)}
+    assert len(seeds) > 15                      # collisions possible, 5+ would be broken
+    assert all(0 <= s < SEED_MAX for s in seeds)
+
+
+def test_seed_from_hash_still_reproducible():
+    """`vt bake` and `vt rehearse` rely on the same taste re-baking to the same track."""
+    from vector_taste.prompt import seed_from_hash
+
+    assert seed_from_hash("2a5559afa725") == seed_from_hash("2a5559afa725")
+
+
+def test_latest_generated_prefers_newest_take(tmp_path, monkeypatch):
+    """The loop must score the take the user just heard, not an older one."""
+    import os
+    import time
+
+    from vector_taste import generate as gen
+
+    monkeypatch.setattr(gen, "GENERATED", tmp_path)
+    old = tmp_path / "abc123-111.wav"
+    new = tmp_path / "abc123-222.wav"
+    old.write_bytes(b"old")
+    new.write_bytes(b"new")
+    os.utime(old, (time.time() - 100, time.time() - 100))
+
+    assert gen.latest_generated("abc123") == new
+    assert gen.latest_generated("nosuchprofile") is None
+
+
+def test_audio_for_profile_prefers_live_over_bank(tmp_path, monkeypatch):
+    """While exploring, a fresh take beats a pre-baked one -- that was the whole bug."""
+    from vector_taste import generate as gen
+
+    monkeypatch.setattr(gen, "GENERATED", tmp_path)
+    (tmp_path / "abc123-999.wav").write_bytes(b"fresh")
+
+    path, note = gen.audio_for_profile("abc123", None)
+    assert path.name == "abc123-999.wav"
+    assert note == ""

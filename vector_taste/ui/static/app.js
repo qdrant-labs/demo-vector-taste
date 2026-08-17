@@ -295,9 +295,33 @@ async function refreshTaste() {
   } catch (e) { toast("taste failed: " + e.message); }
 }
 
+/* Compose now really generates (~2 min on an M4), so a silent spinner would read as a
+   hang. Show elapsed time and say how long it should take. */
+let composeTimer = null;
+function startComposeProgress() {
+  const btn = $("#gen");
+  const t0 = Date.now();
+  btn.disabled = true;
+  const tick = () => {
+    const s = Math.round((Date.now() - t0) / 1000);
+    btn.textContent = `composing… ${s}s`;
+  };
+  tick();
+  composeTimer = setInterval(tick, 1000);
+  toast("composing a new track — about 2 minutes on this machine", 8000);
+}
+function stopComposeProgress() {
+  clearInterval(composeTimer);
+  composeTimer = null;
+  const btn = $("#gen");
+  btn.disabled = false;
+  btn.innerHTML = 'Compose <kbd>G</kbd>';
+}
+
 async function compose() {
   if (!state.pos.size) { toast("mark at least one + first"); return; }
-  $("#gen").disabled = true; $("#gen").textContent = "composing…";
+  if (composeTimer) { toast("already composing"); return; }   // no double-submit
+  startComposeProgress();
   try {
     const g = await api("/api/generate", {
       positives: [...state.pos.keys()], negatives: [...state.neg.keys()],
@@ -311,8 +335,8 @@ async function compose() {
       });
     } catch (e) { console.warn("loop failed", e); }
     showGenerated(g, loop);
-  } catch (e) { toast("compose failed: " + e.message); }
-  finally { $("#gen").disabled = false; $("#gen").innerHTML = 'Compose <kbd>G</kbd>'; }
+  } catch (e) { toast("compose failed: " + e.message, 8000); }
+  finally { stopComposeProgress(); }
 }
 
 function showGenerated(g, loop) {

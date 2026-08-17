@@ -56,14 +56,31 @@ _CATEGORY_OF = {term: cat for cat, term in FLAT}
 _ORDER = ["mood", "instrument", "production", "texture"]
 
 
-def seed_from_hash(profile_hash: str) -> int:
-    """Derive a stable seed from the taste profile.
+SEED_MAX = 2**31 - 1
 
-    Every bank entry previously used seed=42, so identical noise plus near-identical
-    prompts produced near-identical audio. Deriving from the hash gives a different seed per
-    taste while keeping the same taste perfectly reproducible.
+
+def seed_from_hash(profile_hash: str) -> int:
+    """A stable seed derived from the taste profile.
+
+    Used where reproducibility is the point: `vt bake` (the same profile must re-bake to the
+    same track) and `vt rehearse` (which asserts the finale number does not drift).
+
+    Every bank entry previously used seed=42, so identical noise plus near-identical prompts
+    produced near-identical audio.
     """
-    return int(profile_hash[:8], 16) % (2**31 - 1)
+    return int(profile_hash[:8], 16) % SEED_MAX
+
+
+def fresh_seed() -> int:
+    """A new random seed, so composing twice gives two different tracks.
+
+    This is the default for live generation. The prompt is deterministic — the same taste
+    describes the same music — but the seed is not, which is what makes each compose a new
+    performance of that description rather than a replay of the same one.
+    """
+    import secrets
+
+    return secrets.randbelow(SEED_MAX)
 
 
 @dataclass

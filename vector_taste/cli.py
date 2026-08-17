@@ -154,16 +154,22 @@ def cmd_prompt(args):
 def cmd_generate(args):
     from .generate import generate
     from .prompt import load as load_prompt
-    from .prompt import save, seed_from_hash, synthesize
+    from .prompt import save, synthesize
     from .taste import TasteProfile, negative_hits, recommend
 
     profile = TasteProfile.load(args.profile)
-    synth = load_prompt(profile.hash)
     hits = recommend(profile, limit=args.limit)
+    # A cached prompt is reused only when pinning the seed. Otherwise every run must
+    # re-synthesize so it picks up a NEW seed -- reusing the cache would replay the
+    # previous take.
+    synth = load_prompt(profile.hash) if (args.seed or args.reproducible) else None
+    if synth is not None:
+        synth.params.seed = _resolve_seed(args, profile.hash)
     if synth is None:
         synth = synthesize(
             hits, steer=profile.steer, duration=args.duration,
-            negatives=negative_hits(profile), seed=seed_from_hash(profile.hash),
+            negatives=negative_hits(profile),
+            seed=_resolve_seed(args, profile.hash),
             steps=args.steps,
         )
         save(profile.hash, synth)
@@ -189,6 +195,17 @@ def cmd_generate(args):
     if res.note:
         _p(f"  note       {res.note}")
     return 0
+
+
+def _resolve_seed(args, profile_hash: str) -> int:
+    """--seed N pins exactly; --reproducible derives from the taste; otherwise fresh."""
+    from .prompt import fresh_seed, seed_from_hash
+
+    if getattr(args, "seed", None):
+        return int(args.seed)
+    if getattr(args, "reproducible", False):
+        return seed_from_hash(profile_hash)
+    return fresh_seed()
 
 
 def _reference_clip(hit) -> Path | None:
@@ -232,12 +249,12 @@ def cmd_bake(args):
 
 # ----------------------------------------------------------------------------------- loop
 def cmd_loop(args):
-    from .generate import bank_best_match
+    from .generate import audio_for_profile
     from .loop import close_loop
     from .taste import TasteProfile, taste_centroid
 
     profile = TasteProfile.load(args.profile)
-    audio = Path(args.audio) if args.audio else bank_best_match(
+    audio = Path(args.audio) if args.audio else audio_for_profile(
         profile.hash, taste_centroid(profile) if profile.positives else None
     )[0]
     if not audio or not Path(audio).exists():
@@ -373,6 +390,8 @@ def main(argv=None) -> int:
     pr.add_argument("--limit", type=int, default=10)
     pr.add_argument("--duration", type=float, default=30.0)
     pr.add_argument("--steps", type=int, default=8)
+    pr.add_argument("--seed", type=int)
+    pr.add_argument("--reproducible", action="store_true")
     pr.set_defaults(func=cmd_prompt)
 
     g = sub.add_parser("generate", help="compose a track")
@@ -381,6 +400,9 @@ def main(argv=None) -> int:
     g.add_argument("--limit", type=int, default=10)
     g.add_argument("--duration", type=float, default=30.0)
     g.add_argument("--steps", type=int, default=8)
+    g.add_argument("--seed", type=int, help="pin the seed to reproduce an exact take")
+    g.add_argument("--reproducible", action="store_true",
+                   help="derive the seed from the taste instead of composing anew")
     g.add_argument("--no-reference", action="store_true")
     g.set_defaults(func=cmd_generate)
 

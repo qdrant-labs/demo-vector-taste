@@ -18,6 +18,9 @@ RAW = ROOT / "raw"
 AUDIO = ROOT / "audio"
 DATA = ROOT / "data"
 BANK = ROOT / "bank"
+# Live generations land here, separate from the curated bank so fresh output never
+# overwrites or pollutes the pre-baked stage assets.
+GENERATED = ROOT / "generated"
 MODELS = ROOT / "models"
 TIMINGS = ROOT / "timings.jsonl"
 
@@ -48,7 +51,11 @@ SAMPLE_RATE = 48_000
 CHUNK_SEC = 10
 SEGMENT_SEC = 30
 
-GEN_BACKEND = os.getenv("GEN_BACKEND", "bank")
+# Default is `local`: every compose generates a NEW track rather than replaying
+# pre-baked audio. Set GEN_BACKEND=bank for the stage, where a ~2 minute wait in
+# front of an audience is not acceptable and instant playback matters more than
+# freshness.
+GEN_BACKEND = os.getenv("GEN_BACKEND", "local")
 
 
 def get_client() -> QdrantClient:
