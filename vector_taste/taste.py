@@ -46,7 +46,7 @@ class TasteProfile:
 
     @property
     def hash(self) -> str:
-        """Stable ID for the bank lookup. Order-independent: the same set of gestures in a
+        """Stable ID for this taste. Order-independent: the same set of gestures in a
         different order is the same taste."""
         payload = json.dumps(
             {

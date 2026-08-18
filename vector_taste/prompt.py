@@ -2,7 +2,7 @@
 
 Deterministic template, no LLM. That is the design, not a limitation: the offline path is
 the DEFAULT rather than a cached fallback, the same taste always yields the same prompt (so
-a pre-baked bank entry is guaranteed to match), and there is no API key or network call
+the same taste always describes the same music), and there is no API key or network call
 anywhere near the demo's critical path.
 
 What changed, and why
@@ -65,7 +65,7 @@ def seed_from_hash(profile_hash: str) -> int:
     Used where reproducibility is the point: `vt bake` (the same profile must re-bake to the
     same track) and `vt rehearse` (which asserts the finale number does not drift).
 
-    Every bank entry previously used seed=42, so identical noise plus near-identical prompts
+    Every generation previously used seed=42, so identical noise plus near-identical prompts
     produced near-identical audio.
     """
     return int(profile_hash[:8], 16) % SEED_MAX
@@ -255,7 +255,7 @@ def cache_path(profile_hash: str):
 
 
 def save(profile_hash: str, synth: Synthesis):
-    """Cache to disk so the bank and the live path provably use identical parameters."""
+    """Cache to disk so a re-run can prove it used identical parameters."""
     DATA.mkdir(parents=True, exist_ok=True)
     p = cache_path(profile_hash)
     p.write_text(

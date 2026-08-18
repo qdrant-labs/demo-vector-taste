@@ -193,15 +193,12 @@ def cmd_generate(args):
     if hits and not args.no_reference:
         ref = _reference_clip(_reference_hit(hits, args.backend))
 
-    from .taste import taste_centroid
-
-    centroid = taste_centroid(profile) if profile.positives else None
     res = generate(
         synth.params, profile.hash, reference_audio=ref,
-        backend=args.backend, centroid=centroid, vocals=args.vocals,
+        backend=args.backend, vocals=args.vocals,
     )
     _p("")
-    _p(f"  backend    {res.backend}{'  (from bank)' if res.from_bank else ''}")
+    _p(f"  backend    {res.backend}")
     _p(f"  vocals     {'yes' if args.vocals else 'no (instrumental)'}")
     _p(f"  reference  {ref.name if ref else '(none)'}")
     _p(f"  audio      {res.path}")
@@ -267,16 +264,6 @@ def _reference_clip(hit) -> Path | None:
     DATA.mkdir(parents=True, exist_ok=True)
     sf.write(out, np.asarray(clip, dtype="float32"), SAMPLE_RATE)
     return out
-
-
-def cmd_bake(args):
-    from .bake import bake_bank, import_bank
-
-    if args.import_from:
-        return 0 if import_bank(Path(args.import_from)) else 1
-    bake_bank(profiles=args.profile, backend=args.backend,
-              duration=args.duration, steps=args.steps)
-    return 0
 
 
 # ----------------------------------------------------------------------------------- loop
@@ -511,17 +498,6 @@ def main(argv=None) -> int:
                    help="sing rather than play (elevenlabs only)")
     g.set_defaults(func=cmd_generate)
 
-    bk = sub.add_parser("bake", help="pre-generate the bank")
-    bk.add_argument("--profile", action="append")
-    bk.add_argument("--backend", default="local")
-    bk.add_argument("--duration", type=float, default=30.0)
-    bk.add_argument("--steps", type=int, default=8)
-    bk.add_argument(
-        "--import-from",
-        metavar="DIR",
-        help="adopt <profile_hash>.wav files baked on another machine",
-    )
-    bk.set_defaults(func=cmd_bake)
 
     lp = sub.add_parser("loop", help="re-embed the generated track and score it")
     lp.add_argument("profile")

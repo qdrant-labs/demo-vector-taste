@@ -33,9 +33,9 @@ def _fingerprint(hits) -> str:
 
 
 def rehearse(reset: bool = True, runs: int = 3) -> bool:
-    from .generate import bank_best_match
+    from .generate import latest_generated
     from .loop import close_loop
-    from .taste import TasteProfile, diff, recommend, taste_centroid
+    from .taste import TasteProfile, diff, recommend
 
     ok = True
     print()
@@ -85,14 +85,13 @@ def rehearse(reset: bool = True, runs: int = 3) -> bool:
             ok = False
 
     # --- finale stability ---------------------------------------------------------
-    # Nearest-match, not exact: rehearsal should exercise the same lookup the stage uses.
-    audio, match_note = bank_best_match(
-        profile.hash, taste_centroid(profile) if profile.positives else None
-    )
-    if match_note:
-        print(f"  info  bank served {match_note}")
+    # Scores the take this profile last generated. There is no pre-baked audio to fall back
+    # on any more, so if nothing has been composed there is genuinely nothing to score --
+    # say that rather than reporting a READY the finale was never exercised for.
+    audio = latest_generated(profile.hash)
     if not audio:
-        print("  skip  finale               no banked audio (run `vt bake`)")
+        print(f"  skip  finale               nothing generated for {profile.hash} yet")
+        print(f"        compose once (or `vt generate {profile.hash}`), then re-run")
         print("  " + "-" * 76)
         return ok
 

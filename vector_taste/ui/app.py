@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from ..config import BANK, GEN_BACKEND, GENERATED, ROOT, is_cloud
+from ..config import GEN_BACKEND, GENERATED, ROOT, is_cloud
 from ..search import Hit, by_text, format_table  # noqa: F401
 
 STATIC = Path(__file__).parent / "static"
@@ -129,8 +129,9 @@ def _startup() -> None:
     Also clears any audio left over from a previous session, so every run starts on the
     fixed corpus rather than on whatever the last person dropped in.
 
-    Skipped for GEN_BACKEND=bank: the stage config never generates, so holding ~4GB would
-    be pure cost. Never blocks -- search must work while this runs.
+    Only for the backends that actually use it. ACE-Step's footprint is ~19GB, so warming it
+    when the default generator is hosted would be pure cost. Never blocks -- search must work
+    while this runs.
     """
     from ..uploads import purge
 
@@ -141,7 +142,7 @@ def _startup() -> None:
 
         logging.getLogger("vector_taste.ui").warning("upload purge failed: %s", exc)
 
-    if GEN_BACKEND == "bank":
+    if GEN_BACKEND not in ("local", "modal"):
         return
     from ..worker import prewarm
 
@@ -286,7 +287,7 @@ def taste(req: TasteReq):
         }
     # Deliberately NOT saved here. Every +/- gesture hits this route, and persisting each
     # one litters data/ with profiles that `vt bake` would then try to bake. Profiles are
-    # saved on compose, where the prompt cache and bank actually need them.
+    # saved on compose, where the prompt cache actually needs them.
     return payload
 
 
@@ -295,7 +296,7 @@ def generate_route(req: TasteReq):
     from ..generate import VOCALS_BACKENDS, generate
     from ..prompt import fresh_seed, seed_from_hash, synthesize
     from ..prompt import save as save_prompt
-    from ..taste import TasteProfile, negative_hits, recommend, taste_centroid
+    from ..taste import TasteProfile, negative_hits, recommend
 
     profile = TasteProfile(req.positives, req.negatives, req.steer)
     if profile.is_empty():
@@ -324,10 +325,7 @@ def generate_route(req: TasteReq):
     save_prompt(profile.hash, synth)
     profile.save()
 
-    # Pass the centroid so an unrehearsed taste falls back to the NEAREST banked track
-    # rather than silence. Every live gesture produces a new hash.
-    centroid = taste_centroid(profile) if profile.positives else None
-    from ..generate import GenerationAborted
+    from ..generate import GenerationAborted, GenerationError
 
     # Negative descriptors reach the model directly on backends with a negative prompt
     # (ElevenLabs `negative_styles`); elsewhere they are ignored.
@@ -336,22 +334,23 @@ def generate_route(req: TasteReq):
     ]
     try:
         res = generate(
-            synth.params, profile.hash, centroid=centroid,
+            synth.params, profile.hash,
             backend=backend, negatives=neg_desc or None, vocals=req.vocals,
         )
     except GenerationAborted:
         # 499 (client closed request) rather than 500: nothing failed, the user stopped it.
         raise HTTPException(499, "generation aborted") from None
+    except GenerationError as exc:
+        # 502: the generator failed, and there is deliberately nothing to serve instead.
+        # The UI shows this text, so it has to say what actually broke.
+        raise HTTPException(502, str(exc)) from None
     return {
         "profile": profile.hash,
         "prompt": synth.params.prompt,
         "bpm": synth.params.bpm,
         "keyscale": synth.params.keyscale,
         "backend": res.backend,
-        # What was actually produced, not what was asked for: a bank fallback serves a
-        # pre-baked instrumental, and labelling that "with vocals" in the UI would be a lie.
-        "vocals": req.vocals and not res.from_bank,
-        "from_bank": res.from_bank,
+        "vocals": req.vocals,
         # Surfaced so a fallback is visible to the presenter without a stack trace on screen
         "note": res.note,
         "audio_url": f"/generated/{res.path.name}",
@@ -363,13 +362,13 @@ def generate_route(req: TasteReq):
 def loop_route(req: TasteReq):
     from ..generate import audio_for_profile
     from ..loop import close_loop
-    from ..taste import TasteProfile, taste_centroid
+    from ..taste import TasteProfile
 
     profile = TasteProfile(req.positives, req.negatives, req.steer)
     if not profile.positives:
         raise HTTPException(400, "mark at least one positive first")
     # Score the audio the user actually heard, including a nearest-match fallback.
-    audio, _ = audio_for_profile(profile.hash, taste_centroid(profile))
+    audio, _ = audio_for_profile(profile.hash)
     if not audio:
         raise HTTPException(404, "generate a track first")
     r = close_loop(audio, profile, upsert=True)
@@ -420,8 +419,8 @@ def audio(segment_id: str):
 
 @app.get("/generated/{name}")
 def generated(name: str):
-    """Serve a generated take, or a banked one. Both dirs, never outside them."""
-    for root in (GENERATED, BANK):
+    """Serve a generated take. Never outside GENERATED."""
+    for root in (GENERATED,):
         path = (root / name).resolve()
         if path.is_file() and root.resolve() in path.parents:
             # ElevenLabs returns mp3, ACE-Step wav -- serve each as what it actually is.

@@ -154,13 +154,12 @@ document.querySelector("#modes").addEventListener("click", (e) => {
    with no server restart.
 
    Null until boot reads the server's GEN_BACKEND: the request ALWAYS carries a backend, so
-   defaulting to a guess here would silently override the stage config (GEN_BACKEND=bank)
-   with whatever this file happened to hardcode. */
+   defaulting to a guess here would silently override whatever GEN_BACKEND says with
+   whatever this file happened to hardcode. */
 let backend = null;
 let backendsAvailable = {};
 
 const BACKEND_NOTE = {
-  bank: "generator: pre-baked bank (instant)",
   local: "generator: Local ACE-Step (~2 min)",
   elevenlabs: "generator: ElevenLabs (seconds)",
 };
@@ -170,7 +169,7 @@ const BACKEND_NOTE = {
 function syncStatus() {
   const el = $("#status");
   if (!el.dataset.base) return;                 // boot has not answered yet
-  const worker = backend === "bank" ? "" : (el.dataset.worker || "");
+  const worker = backend === "local" ? (el.dataset.worker || "") : "";
   el.textContent = `${el.dataset.base} · ${backend}${worker}`;
 }
 
@@ -758,7 +757,7 @@ function renderGenPanel() {
       <dl class="kv">
         <dt>prompt</dt><dd>${esc(g.prompt)}</dd>
         <dt>bpm / key</dt><dd class="mono">${g.bpm ?? "—"} · ${esc(g.keyscale ?? "—")}</dd>
-        <dt>generator</dt><dd class="mono">${esc(g.backend)}${g.from_bank ? " (pre-baked)" : ""}${g.vocals ? " · vocals" : ""}</dd>
+        <dt>generator</dt><dd class="mono">${esc(g.backend)}${g.vocals ? " · vocals" : ""}</dd>
       </dl>
     </div>`;
   p.hidden = false;

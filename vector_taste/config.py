@@ -17,9 +17,6 @@ load_dotenv(ROOT / ".env")
 RAW = ROOT / "raw"
 AUDIO = ROOT / "audio"
 DATA = ROOT / "data"
-BANK = ROOT / "bank"
-# Live generations land here, separate from the curated bank so fresh output never
-# overwrites or pollutes the pre-baked stage assets.
 GENERATED = ROOT / "generated"
 MODELS = ROOT / "models"
 TIMINGS = ROOT / "timings.jsonl"
@@ -51,11 +48,11 @@ SAMPLE_RATE = 48_000
 CHUNK_SEC = 10
 SEGMENT_SEC = 30
 
-# Default is `local`: every compose generates a NEW track rather than replaying
-# pre-baked audio. Set GEN_BACKEND=bank for the stage, where a ~2 minute wait in
-# front of an audience is not acceptable and instant playback matters more than
-# freshness.
-GEN_BACKEND = os.getenv("GEN_BACKEND", "local")
+# Default is `elevenlabs`: ~4s per track against 2-5 minutes locally, which is the
+# difference between composing in front of an audience and waiting in front of one.
+# It needs the network and a key -- set GEN_BACKEND=local to stay entirely offline,
+# or switch with the toggle in the UI without restarting.
+GEN_BACKEND = os.getenv("GEN_BACKEND", "elevenlabs")
 
 
 def get_client() -> QdrantClient:

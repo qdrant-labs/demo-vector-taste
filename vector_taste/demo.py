@@ -1,8 +1,8 @@
 """Build the scripted demo taste profiles.
 
-The bank is keyed by taste-profile hash, so baking needs profiles to exist first. These are
+Profiles are keyed by taste-profile hash. These are
 generated deterministically from the scripted queries rather than hand-picked, so a rebuilt
-corpus regenerates the same demo path instead of leaving dangling point IDs in the bank.
+corpus regenerates the same demo path instead of leaving dangling point IDs behind.
 
 The negative is drawn from INSIDE the current result set, not from an opposing query. That
 is not a detail — it is the whole reason the demo works.
@@ -55,7 +55,7 @@ def build_demo_profiles(verbose: bool = True) -> list[TasteProfile]:
             steer=query,
         )
         profile.save(name)
-        profile.save()  # also under its hash, which is what the bank looks up
+        profile.save()  # also under its hash, which is what lookups use
         profiles.append(profile)
 
         if verbose:

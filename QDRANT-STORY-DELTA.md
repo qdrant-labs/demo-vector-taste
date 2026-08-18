@@ -101,8 +101,13 @@ afterward as colour only.
 Say *"closer to your taste than 85% of 8,828 corpus segments."*
 
 The middle row is worth knowing but not worth a slide: expanding changed what retrieval
-returns, so the banked audio had been generated from prompts the corpus no longer produces.
-Re-baking recovered ~4 points.
+returns, so the pre-generated audio had been made from prompts the corpus no longer produces.
+Regenerating recovered ~4 points.
+
+> **Since this was measured, the pre-baked "bank" has been removed from the app.** The three
+> rows above are an accurate record of how those numbers were obtained at the time; **84.7 is
+> the current figure** and the only one that belongs on a slide. Generation is now hosted
+> (~4s) or local, with no pre-baked fallback.
 
 ## 6. Retrieval quality — a new claim you can now make
 

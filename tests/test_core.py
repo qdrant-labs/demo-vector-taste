@@ -133,7 +133,7 @@ def test_diff_of_identical_sets_is_unchanged():
 
 # ------------------------------------------------------------------------------ profile
 def test_profile_hash_is_order_independent():
-    """The same gestures in a different order are the same taste, so the bank must hit."""
+    """The same gestures in a different order are the same taste, so the hash must match."""
     a = TasteProfile(["p1", "p2"], ["n1"], "warm")
     b = TasteProfile(["p2", "p1"], ["n1"], "Warm ")
     assert a.hash == b.hash
@@ -178,53 +178,6 @@ def test_caption_mentions_tags_and_bpm():
     assert "jazz" in cap and "90" in cap and "D" in cap
 
 
-# ------------------------------------------------------------------- bank fallback
-def test_bank_best_match_falls_back_to_nearest_taste(tmp_path, monkeypatch):
-    """An unrehearsed taste must return the closest banked track, never silence.
-
-    The bank is keyed by taste-profile hash, and every live gesture on stage produces a new
-    hash. Exact-match lookup would hand the presenter a silent file for any improvisation.
-    """
-    import json
-
-    import numpy as np
-
-    from vector_taste import generate as gen
-
-    monkeypatch.setattr(gen, "BANK", tmp_path)
-    monkeypatch.setattr(gen, "BANK_INDEX", tmp_path / "bank.json")
-
-    near = np.zeros(512, dtype=np.float32)
-    near[0] = 1.0
-    far = np.zeros(512, dtype=np.float32)
-    far[1] = 1.0
-    for name in ("near", "far"):
-        (tmp_path / f"{name}.wav").write_bytes(b"RIFF" + b"\0" * 2048)
-    (tmp_path / "bank.json").write_text(json.dumps({
-        "near": {"file": "near.wav", "centroid": near.tolist()},
-        "far": {"file": "far.wav", "centroid": far.tolist()},
-    }))
-
-    query = np.zeros(512, dtype=np.float32)
-    query[0] = 0.9
-    query[1] = 0.1
-    path, note = gen.bank_best_match("never-baked-hash", query)
-    assert path is not None and path.name == "near.wav"
-    assert "nearest banked taste" in note
-
-    # An exact hash hit must win outright and carry no fallback note.
-    path, note = gen.bank_best_match("near", query)
-    assert path.name == "near.wav" and note == ""
-
-
-def test_bank_best_match_without_centroid_is_exact_only():
-    """No centroid to compare against means no guessing — return nothing, not a wrong track."""
-    from vector_taste.generate import bank_best_match
-
-    path, note = bank_best_match("definitely-not-a-real-hash", None)
-    assert path is None and note == ""
-
-
 # --------------------------------------------------------------- descriptors / prompts
 def _dhit(seg, descriptors, tags=("hip-hop",), bpm=100):
     return Hit(seg, 0.5, f"p-{seg}", {"descriptors": list(descriptors),
@@ -232,7 +185,7 @@ def _dhit(seg, descriptors, tags=("hip-hop",), bpm=100):
 
 
 def test_seed_differs_per_taste_and_is_stable():
-    """Every bank entry used seed=42, so identical noise made every track sound alike."""
+    """Every generation used seed=42, so identical noise made every track sound alike."""
     from vector_taste.prompt import seed_from_hash
 
     a, b = seed_from_hash("2a5559afa725"), seed_from_hash("b07e5152536a")
@@ -341,16 +294,18 @@ def test_latest_generated_prefers_newest_take(tmp_path, monkeypatch):
     assert gen.latest_generated("nosuchprofile") is None
 
 
-def test_audio_for_profile_prefers_live_over_bank(tmp_path, monkeypatch):
-    """While exploring, a fresh take beats a pre-baked one -- that was the whole bug."""
+def test_audio_for_profile_returns_the_latest_take_or_nothing(tmp_path, monkeypatch):
+    """There is no pre-baked audio to fall back on any more. When a taste has never been
+    composed there is genuinely nothing to score, and the caller has to be told so rather
+    than handed something older."""
     from vector_taste import generate as gen
 
     monkeypatch.setattr(gen, "GENERATED", tmp_path)
-    (tmp_path / "abc123-999.wav").write_bytes(b"fresh")
+    assert gen.audio_for_profile("never-composed") == (None, "")
 
-    path, note = gen.audio_for_profile("abc123", None)
-    assert path.name == "abc123-999.wav"
-    assert note == ""
+    (tmp_path / "hash-7.mp3").write_bytes(b"x")
+    path, note = gen.audio_for_profile("hash")
+    assert path.name == "hash-7.mp3" and note == ""
 
 
 # ------------------------------------------------------------------- progress reporting
@@ -408,10 +363,10 @@ def test_progress_snapshot_reports_elapsed():
 
 # ---------------------------------------------------------------------------- aborting
 def test_abort_is_not_a_generic_failure():
-    """An abort must never be swallowed by the bank fallback.
+    """An abort must not be reported as a failure.
 
-    Someone who pressed stop wants silence, not a pre-baked track they didn't ask for, so
-    GenerationAborted has to survive the `except Exception` that catches real failures.
+    Someone who pressed stop did not hit an error, so GenerationAborted has to survive the
+    `except Exception` that turns real backend faults into a GenerationError.
     """
     from vector_taste.generate import GenerationAborted, GenerationError
     from vector_taste.worker import WorkerAborted, WorkerError
@@ -867,3 +822,39 @@ def test_the_build_id_changes_when_the_front_end_changes(tmp_path, monkeypatch):
     finally:
         os.utime(js, ns=(stat.st_atime_ns, stat.st_mtime_ns))
     assert ui.build_id() == before
+
+
+# --------------------------------------------------------------- no fallback, on purpose
+def test_a_failing_backend_raises_instead_of_serving_something_older():
+    """Every backend used to degrade silently to pre-baked audio, and to a generated silent
+    wav when there was none. That made a broken generator indistinguishable from a working
+    one -- you found out after the talk, not during it. Now it raises with the reason.
+    """
+    import pytest
+
+    from vector_taste.generate import GenerationError, generate
+    from vector_taste.prompt import GenerationParams
+
+    params = GenerationParams(prompt="x", seed=1, audio_duration=5.0)
+    with pytest.raises(GenerationError, match="unknown GEN_BACKEND"):
+        generate(params, "nofallback", backend="does-not-exist")
+
+
+def test_nothing_pre_baked_survives_in_the_generation_module():
+    """The bank is gone: no index, no nearest-taste match, no silent placeholder, and no
+    `from_bank` flag for the UI to label."""
+    import inspect
+
+    from vector_taste import generate as gen
+
+    src = inspect.getsource(gen)
+    for gone in ("bank_best_match", "bank_lookup", "bank_add", "bank_status",
+                 "_placeholder", "BANK_INDEX", "from_bank"):
+        assert gone not in src, gone
+    assert "bank" not in gen.available_backends()
+
+
+def test_the_ui_offers_only_generators_that_generate():
+    html = __import__("pathlib").Path("vector_taste/ui/static/index.html").read_text()
+    assert 'data-backend="bank"' not in html
+    assert 'data-backend="local"' in html and 'data-backend="elevenlabs"' in html

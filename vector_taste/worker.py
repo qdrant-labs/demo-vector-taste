@@ -74,7 +74,7 @@ class WorkerError(RuntimeError):
 class WorkerAborted(WorkerError):
     """Raised in the blocked generate() call when the user aborts.
 
-    Distinct from a failure on purpose: an abort must NOT fall back to the bank. Someone who
+    Distinct from a failure on purpose: an abort is not an error to report. Someone who
     pressed stop wants silence, not a track they didn't ask for.
     """
 
@@ -103,7 +103,7 @@ class AceStepWorker:
         if py is None:
             raise WorkerError(
                 f"ACE-Step is not installed at {acestep_dir()}. "
-                "Run ./scripts/acestep_setup.sh, or use GEN_BACKEND=bank."
+                "Run ./scripts/acestep_setup.sh, or use GEN_BACKEND=elevenlabs."
             )
         self._proc = subprocess.Popen(  # noqa: S603
             [str(py), str(WORKER)],

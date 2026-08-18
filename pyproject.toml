@@ -53,9 +53,9 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
 ignore = [
-    # Broad excepts are deliberate in exactly two places: the generation backend, which must
-    # always degrade to the pre-baked bank rather than surface a traceback during a live
-    # demo, and preflight, where one failing check must not abort the rest of the checklist.
+    # Broad excepts are deliberate in exactly two places: the generation dispatcher, which
+    # turns any backend fault into one GenerationError carrying a readable message, and
+    # preflight, where one failing check must not abort the rest of the checklist.
     "B904",
     "E501",  # long lines are caught by the formatter, not the linter
 ]
