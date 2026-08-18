@@ -124,7 +124,7 @@ def bake_bank(
 def import_bank(src_dir: Path) -> int:
     """Adopt .wav files baked elsewhere (a GPU box, a colleague's machine).
 
-    Filenames must be <profile_hash>.wav; the bank is keyed by hash so a mislabelled file
+    Filenames must be <profile_hash>.wav; the bank is keyed by hash so a mislabeled file
     would silently never be found.
     """
     from .prompt import load as load_prompt

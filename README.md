@@ -98,7 +98,7 @@ Generation has five backends, selected with `GEN_BACKEND` — or picked live fro
 one track. The toggle starts on whatever `GEN_BACKEND` says, so the stage config still wins by
 default. **Search works without any of them.**
 
-| `GEN_BACKEND` | Behaviour | Needs | Cost |
+| `GEN_BACKEND` | Behavior | Needs | Cost |
 |---|---|---|---|
 | `local` *(default)* | composes a **new track every time** | Apple Silicon (MLX) or an NVIDIA GPU, `./scripts/acestep_setup.sh` | free, ~2 min/track |
 | `bank` | replays pre-generated tracks, instantly | nothing | free |
@@ -143,8 +143,37 @@ Two things it does *better* than local, and three caveats worth knowing before y
   a guarantee.
 - **It needs the network**, so it is not the stage config. `vt preflight` flags that.
 
+#### Vocals
+
+The **Instrumental · Vocals** toggle beside Compose (`V`) is ElevenLabs-only, and disables
+itself on the other generators rather than pretending. ACE-Step has no lyrics source, so
+vocals there would be wordless syllables; the API refuses the combination with a 400 instead
+of quietly handing back an instrumental.
+
+There is a wrinkle worth knowing. In plan mode a chunk's `text` **is** the lyric content, and
+this demo retrieves *sound* — there are no words to put there. So a vocal take makes an extra
+call to `POST /v1/music/plan`, which writes a plan from our prompt, and we keep only its
+lyrics: the styles, negatives, duration and audio conditioning are all still ours. Asking it
+for lyrics explicitly matters — handed the bare sound description it planned `[Intro]` /
+`[Groove]` with no words at all.
+
+Measured on real output, CLAP-scored against "a song with singing voice and vocals" versus
+"instrumental music, no vocals":
+
+| | vocals | instrumental | verdict |
+|---|---|---|---|
+| toggle off | +0.2133 | **+0.2822** | instrumental |
+| toggle on | **+0.2542** | +0.1144 | sings |
+
+The extra call costs ~5s (8.5s total vs 3.4s instrumental). **Its price is unmeasured**: the
+`character_count` on `/v1/user/subscription` does not move for music at all — not for the plan
+call and not for a generation we know was billed — so that meter cannot answer the question.
+It returns JSON rather than audio, and ElevenLabs bills music per minute of audio, but treat
+that as reasoning rather than a measurement. If the lyric call fails the track still
+generates, from a bare `[Verse]` marker.
+
 **Do not commit ElevenLabs output.** Their Music terms prohibit, on the self-serve tiers, creating
-"a library, catalogue, database, or other repository of Output … making it available to third
+"a library, catalog, database, or other repository of Output … making it available to third
 parties" — which a public repo of generated tracks plausibly is. `generated/` is gitignored, and the
 committed `bank/` is ACE-Step-only by design.
 

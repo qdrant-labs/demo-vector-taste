@@ -54,6 +54,8 @@ class TasteReq(BaseModel):
     # Which generator to use for THIS compose. None -> the GEN_BACKEND default, so the
     # toggle can change generator without restarting the server.
     backend: str | None = None
+    # Sing rather than play. Only some backends can; the route rejects the rest outright.
+    vocals: bool = False
     # Pin the seed to re-hear an exact take instead of composing a new one.
     reproducible: bool = False
 
@@ -90,7 +92,7 @@ def status():
         info = collection_info()
     except Exception as exc:
         raise HTTPException(503, f"Qdrant unavailable: {exc}") from exc
-    from ..generate import available_backends
+    from ..generate import VOCALS_BACKENDS, available_backends
 
     return {
         "points": info["points"],
@@ -98,6 +100,8 @@ def status():
         "backend": GEN_BACKEND,
         "worker": worker_state(),
         "backends": available_backends(),
+        # So the UI can disable the vocals toggle rather than fail on Compose.
+        "vocals_backends": sorted(VOCALS_BACKENDS),
     }
 
 
@@ -170,7 +174,7 @@ def taste(req: TasteReq):
 
 @app.post("/api/generate")
 def generate_route(req: TasteReq):
-    from ..generate import generate
+    from ..generate import VOCALS_BACKENDS, generate
     from ..prompt import fresh_seed, seed_from_hash, synthesize
     from ..prompt import save as save_prompt
     from ..taste import TasteProfile, negative_hits, recommend, taste_centroid
@@ -178,6 +182,15 @@ def generate_route(req: TasteReq):
     profile = TasteProfile(req.positives, req.negatives, req.steer)
     if profile.is_empty():
         raise HTTPException(400, "mark at least one positive first")
+
+    backend = req.backend or GEN_BACKEND
+    if req.vocals and backend not in VOCALS_BACKENDS:
+        # Reject rather than quietly hand back an instrumental: the user asked for a voice
+        # and would have no way to tell the request was dropped.
+        raise HTTPException(
+            400, f"the {backend} generator cannot sing — switch to "
+                 f"{' or '.join(sorted(VOCALS_BACKENDS))}"
+        )
 
     hits = recommend(profile, limit=10)
     synth = synthesize(
@@ -188,6 +201,7 @@ def generate_route(req: TasteReq):
         negatives=negative_hits(profile),
         seed=seed_from_hash(profile.hash) if req.reproducible else fresh_seed(),
         steps=req.steps,
+        vocals=req.vocals,
     )
     save_prompt(profile.hash, synth)
     profile.save()
@@ -205,7 +219,7 @@ def generate_route(req: TasteReq):
     try:
         res = generate(
             synth.params, profile.hash, centroid=centroid,
-            backend=req.backend or None, negatives=neg_desc or None,
+            backend=backend, negatives=neg_desc or None, vocals=req.vocals,
         )
     except GenerationAborted:
         # 499 (client closed request) rather than 500: nothing failed, the user stopped it.
@@ -216,6 +230,9 @@ def generate_route(req: TasteReq):
         "bpm": synth.params.bpm,
         "keyscale": synth.params.keyscale,
         "backend": res.backend,
+        # What was actually produced, not what was asked for: a bank fallback serves a
+        # pre-baked instrumental, and labelling that "with vocals" in the UI would be a lie.
+        "vocals": req.vocals and not res.from_bank,
         "from_bank": res.from_bank,
         # Surfaced so a fallback is visible to the presenter without a stack trace on screen
         "note": res.note,
@@ -245,6 +262,9 @@ def loop_route(req: TasteReq):
         "baseline_cosine": round(r.baseline_cosine, 4),
         "baseline_percentile": round(r.baseline_percentile, 1),
         "beats_baseline": r.beats_baseline,
+        # WHICH human track that baseline is, so the UI can play the comparison rather
+        # than only print its cosine.
+        "baseline": _hit_json(r.baseline_hit) if r.baseline_hit else None,
     }
 
 

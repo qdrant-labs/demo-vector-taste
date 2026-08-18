@@ -39,7 +39,7 @@ COLLECTION = os.getenv("VT_COLLECTION", "music_segments")
 # The music checkpoint is degenerate here: it emits near-identical vectors for completely
 # different tracks (two unrelated songs embed at cosine 0.99), so every text query returns
 # the same results. Weights load with no missing or mismatched keys, so this is the
-# checkpoint's behaviour, not a loading bug. Re-run scripts/eval_embedders.py to re-check.
+# checkpoint's behavior, not a loading bug. Re-run scripts/eval_embedders.py to re-check.
 CLAP_MODEL = os.getenv("VT_CLAP_MODEL", "laion/larger_clap_general")
 CLAP_REVISION = os.getenv("VT_CLAP_REVISION") or None
 EMBED_DIM = 512

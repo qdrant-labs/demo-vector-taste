@@ -16,7 +16,7 @@
   } catch (e) { /* private mode: fall through to the dark default on <html> */ }
 </script>
 
-<!-- Qdrant publishes no full-colour SVG favicon, so the brandmark serves as one. -->
+<!-- Qdrant publishes no full-color SVG favicon, so the brandmark serves as one. -->
 <link rel="icon" type="image/svg+xml" href="/static/img/qdrant-brandmark-red.svg">
 
 <!-- crossorigin is required even same-origin, or the browser fetches each font twice. -->
@@ -71,6 +71,10 @@
       <button data-backend="local" role="radio" aria-checked="false" title="ACE-Step on this Mac (~2 min, offline)">Local</button>
       <button data-backend="elevenlabs" role="radio" aria-checked="false" title="ElevenLabs Music (seconds, needs a key)">ElevenLabs</button>
     </div>
+    <div class="seg" id="vocals" role="radiogroup" aria-label="Vocals">
+      <button data-vocals="0" role="radio" aria-checked="true" title="No singing">Instrumental</button>
+      <button data-vocals="1" role="radio" aria-checked="false" title="Sung vocals (ElevenLabs only)">Vocals</button>
+    </div>
     <button id="gen" class="primary">Compose <kbd>G</kbd></button>
     <button id="clear" class="ghost">Clear</button>
   </div>
@@ -91,6 +95,14 @@
   </div>
 </section>
 
+<section class="result-panel" id="genpanel" hidden>
+  <div class="genhead">
+    <h2>Composed</h2>
+    <button id="closegen" class="ghost">Close</button>
+  </div>
+  <div id="genbody"></div>
+</section>
+
 <main>
   <div id="results" class="results"></div>
   <div id="empty" class="empty">
@@ -99,17 +111,9 @@
        <span class="neg">−</span> less like this — and watch the list move.</p>
     <p class="keys dim"><kbd>/</kbd> search · <kbd>↑↓</kbd> move · <kbd>space</kbd> play ·
        <kbd>←</kbd><kbd>→</kbd> ±15s · <kbd>+</kbd>/<kbd>−</kbd> mark · <kbd>G</kbd> compose ·
-       <kbd>T</kbd> theme · <kbd>B</kbd> generator</p>
+       <kbd>T</kbd> theme · <kbd>B</kbd> generator · <kbd>V</kbd> vocals</p>
   </div>
 </main>
-
-<section class="result-panel" id="genpanel" hidden>
-  <div class="genhead">
-    <h2>Composed</h2>
-    <button id="closegen" class="ghost">Close</button>
-  </div>
-  <div id="genbody"></div>
-</section>
 
 <div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
 <script src="/static/app.js"></script>

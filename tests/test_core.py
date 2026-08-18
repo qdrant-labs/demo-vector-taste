@@ -55,7 +55,7 @@ def test_restrictive_rejected(lic):
 
     ND matters most: a style-referenced generation is arguably a derivative work.
     SA would propagate share-alike onto generated output. Missing metadata is not a
-    licence, so it is rejected too.
+    license, so it is rejected too.
     """
     assert not is_permissive(lic)
 
@@ -255,7 +255,7 @@ def test_negative_removes_shared_descriptors():
     without = contrastive_descriptors(pos, None)
     with_neg = contrastive_descriptors(pos, neg)
     assert "dreamy and hazy" in without["mood"]
-    assert "dreamy and hazy" not in with_neg["mood"]     # cancelled by the negative
+    assert "dreamy and hazy" not in with_neg["mood"]     # canceled by the negative
     assert "grand piano" in with_neg["instrument"]       # unique to the positive, survives
 
 
@@ -503,3 +503,99 @@ def test_abort_registry_dispatches_to_whichever_backend_is_running():
     register_aborter(lambda: (_ for _ in ()).throw(RuntimeError("boom")))
     assert abort_current() is False
     register_aborter(None)
+
+
+# --------------------------------------------------------------------------- vocals
+def test_vocals_keeps_their_lyrics_and_our_everything_else():
+    """The plan endpoint supplies words; the taste supplies the music.
+
+    Overwriting their positive_styles is the point -- otherwise the retrieved taste would be
+    replaced by whatever ElevenLabs guessed from the prompt.
+    """
+    from vector_taste.elevenlabs import build_plan
+
+    lyric_chunks = [
+        {"text": "[Verse]\nCity lights are fading", "positive_styles": ["their guess"]},
+        {"text": "[Chorus]\nHold on", "positive_styles": ["their other guess"]},
+    ]
+    plan = build_plan(_gp(), "song123", None, True, lyric_chunks)
+    chunks = plan["chunks"]
+    assert [c["text"] for c in chunks] == [c["text"] for c in lyric_chunks]
+    assert all("their guess" not in c["positive_styles"] for c in chunks)
+    assert all("warm acoustic guitar" in c["positive_styles"] for c in chunks)
+    # Our duration is split across their sections rather than multiplied by them.
+    assert sum(c["duration_ms"] for c in chunks) <= _gp().audio_duration * 1000
+
+
+def test_vocals_drops_the_no_vocals_negatives():
+    """NO_VOCALS is how instrumental is enforced; leaving it in would forbid what was asked."""
+    from vector_taste.elevenlabs import build_plan
+
+    sung = build_plan(_gp(), None, ["heavily distorted and fuzzy"], vocals=True)["chunks"][0]
+    assert not any(n in sung["negative_styles"] for n in ("vocals", "singing", "choir"))
+    assert "sung vocals" in sung["positive_styles"]
+    # The contradiction filter still runs on the rejected example's descriptors.
+    assert "heavily distorted and fuzzy" in sung["negative_styles"]
+
+
+def test_vocals_falls_back_to_a_section_marker_when_the_lyric_plan_fails():
+    """Losing the lyrics must not lose the track -- same rule as a failed reference upload."""
+    from vector_taste.elevenlabs import build_plan
+
+    chunks = build_plan(_gp(), None, None, vocals=True, lyric_chunks=None)["chunks"]
+    assert len(chunks) == 1
+    assert chunks[0]["text"] == "[Verse]"
+    assert "sung vocals" in chunks[0]["positive_styles"]
+
+
+def test_conditioning_lands_on_the_first_chunk_only():
+    """Per the spec the first chunk "influences all subsequent chunks", so repeating the
+    reference on every section buys nothing and costs plan size."""
+    from vector_taste.elevenlabs import build_plan
+
+    chunks = build_plan(
+        _gp(), "song123", None, True,
+        [{"text": "[Verse]"}, {"text": "[Chorus]"}, {"text": "[Outro]"}],
+    )["chunks"]
+    assert "conditioning_ref" in chunks[0]
+    assert all("conditioning_ref" not in c for c in chunks[1:])
+
+
+def test_synthesized_prompt_stops_saying_instrumental_when_vocals_are_on():
+    from vector_taste.prompt import synthesize
+
+    assert "no vocals" in synthesize([], duration=15.0).params.prompt
+    assert "no vocals" not in synthesize([], duration=15.0, vocals=True).params.prompt
+
+
+def test_vocals_are_refused_on_backends_that_cannot_sing():
+    """A silent instrumental would give the user no way to tell the request was dropped."""
+    import pytest
+
+    from vector_taste.generate import VOCALS_BACKENDS, GenerationError, generate
+
+    assert "elevenlabs" in VOCALS_BACKENDS and "local" not in VOCALS_BACKENDS
+    with pytest.raises(GenerationError, match="cannot generate vocals"):
+        generate(_gp(), "vocalguard", backend="local", vocals=True)
+
+
+def test_the_baseline_excludes_the_whole_track_you_marked_not_just_that_chunk():
+    """A track is several 10s chunk points. Filtering the exact point the user clicked let a
+    DIFFERENT chunk of that same track come back as the "closest human" -- measured at cosine
+    0.94, which is the ~0.91-by-construction score this filter exists to keep out. It made
+    every generated result look worse than it was."""
+    from vector_taste.loop import _segments_of
+
+    class _Hit:
+        def __init__(self, seg, pid):
+            self.segment_id, self.point_id = seg, pid
+
+    marked_point, other_chunk = "p-a", "p-b"          # same track, different windows
+    results = [_Hit("trk:0", other_chunk), _Hit("trk2:0", "p-c")]
+
+    by_point = [h for h in results if h.point_id not in {marked_point}]
+    assert by_point[0].segment_id == "trk:0"          # the old filter: leaks the same track
+
+    by_segment = [h for h in results if h.segment_id not in {"trk:0"}]
+    assert by_segment[0].segment_id == "trk2:0"       # the fix: a genuinely different track
+    assert callable(_segments_of)

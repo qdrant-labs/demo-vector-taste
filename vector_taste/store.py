@@ -105,7 +105,7 @@ def count(only_generated: bool | None = None) -> int:
 def delete_generated() -> int:
     """Purge generated points.
 
-    Needed because generated points would otherwise become search neighbours and shift the
+    Needed because generated points would otherwise become search neighbors and shift the
     finale percentile on the second rehearsal run - a bug that only appears on a re-run.
     """
     n = count(only_generated=True)

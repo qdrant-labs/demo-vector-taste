@@ -9,6 +9,8 @@ const state = {
   cursor: -1,
   diff: null,
   playing: null,
+  gen: null,        // last /api/generate result, kept so the tile can re-render on play/pause
+  loop: null,       // its /api/loop scoring
 };
 
 /* ------------------------------------------------------------------ audio + equalizer */
@@ -160,6 +162,10 @@ function setBackend(name, quiet) {
   backend = name;
   try { localStorage.setItem("vt-backend", name); } catch { /* private mode */ }
   renderBackends();
+  // Switching to a generator that cannot sing has to drop vocals with it, or Compose would
+  // send a combination the server rejects.
+  if (vocals && !canSing()) vocals = false;
+  renderVocals();
   if (!quiet) toast(BACKEND_NOTE[name] || `generator: ${name}`, 2500);
   syncStatus();
 }
@@ -167,6 +173,42 @@ function setBackend(name, quiet) {
 document.querySelector("#backends").addEventListener("click", (e) => {
   const b = e.target.closest("[data-backend]");
   if (b) setBackend(b.dataset.backend);
+});
+
+/* --------------------------------------------------------------------------- vocals */
+/* Instrumental everywhere except ElevenLabs: ACE-Step has no lyrics source and would sing
+   wordless syllables, so the option disables itself rather than lying about what it does.
+   The server rejects the combination too — this toggle is convenience, not the guard. */
+let vocals = false;
+let vocalsBackends = ["elevenlabs"];
+
+const canSing = () => vocalsBackends.includes(backend);
+
+function renderVocals() {
+  const ok = canSing();
+  for (const b of document.querySelectorAll("#vocals button")) {
+    b.disabled = !ok;
+    b.setAttribute("aria-checked", String((b.dataset.vocals === "1") === vocals));
+    b.title = ok
+      ? (b.dataset.vocals === "1" ? "Sung vocals" : "No singing")
+      : `Vocals need the ${vocalsBackends.join(" or ")} generator`;
+  }
+}
+
+function setVocals(on, quiet) {
+  if (on && !canSing()) {
+    toast(`the ${backend} generator cannot sing — switch generator with B`, 5000);
+    return;
+  }
+  vocals = on;
+  try { localStorage.setItem("vt-vocals", on ? "1" : "0"); } catch { /* private mode */ }
+  renderVocals();
+  if (!quiet) toast(on ? "vocals: sung" : "vocals: instrumental", 2200);
+}
+
+document.querySelector("#vocals").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-vocals]");
+  if (b) setVocals(b.dataset.vocals === "1");
 });
 
 /* ------------------------------------------------------------------------- transport */
@@ -292,6 +334,7 @@ function render() {
     .concat([...state.neg.values()].map((h) => chip(h, "neg"))).join("");
   $("#chips").innerHTML = chips || '<span class="dim">no examples marked yet</span>';
   $("#tastebar").hidden = state.pos.size === 0 && state.neg.size === 0;
+  renderGenPanel();
 }
 
 const chip = (h, kind) => `<span class="chip ${kind}">
@@ -395,7 +438,7 @@ function startComposeProgress() {
   composeTimer = setInterval(poll, 500);
 }
 
-/* ACE-Step cannot be cancelled cooperatively, so the server kills the worker. The model
+/* ACE-Step cannot be canceled cooperatively, so the server kills the worker. The model
    reload it costs is started immediately in the background -- the header shows "warming
    model" while you carry on marking tracks. */
 async function abortCompose() {
@@ -427,7 +470,7 @@ async function compose() {
   try {
     const g = await api("/api/generate", {
       positives: [...state.pos.keys()], negatives: [...state.neg.keys()],
-      steer: $("#steer").value, backend,
+      steer: $("#steer").value, backend, vocals,
     });
     let loop = null;
     try {
@@ -446,11 +489,40 @@ async function compose() {
   }
 }
 
-function showGenerated(g, loop) {
+/* One play row. Deliberately NOT an <audio controls> element: the page already has a
+   transport, and a second element on the same URL played the track twice — once itself and
+   once through the listener that fed the analyser. Everything routes through play(). */
+function playRow(url, kind, label, score, note) {
+  if (!url) return "";
+  const on = state.playing === url && !audioEl.paused;
+  return `
+  <button class="playrow${on ? " playing" : ""}" data-play-url="${esc(url)}"
+          data-play-label="${esc(label)}" aria-label="${on ? "Pause" : "Play"} ${esc(label)}">
+    <span class="rowplay" aria-hidden="true">${on ? "❚❚" : "▶"}</span>
+    <span class="playrow-meta">
+      <span class="playrow-kind">${esc(kind)}</span>
+      <span class="playrow-label">${esc(label)}</span>
+    </span>
+    <span class="playrow-score mono">${score ?? ""}<span class="dim"> ${esc(note || "")}</span></span>
+  </button>`;
+}
+
+/* Split out of showGenerated so render() can redraw it: the ▶/❚❚ on each row has to follow
+   playback, and render() already runs on every play, pause and ended. */
+function renderGenPanel() {
   const p = $("#genpanel");
+  const g = state.gen;
+  if (!g) { p.hidden = true; return; }
+  const loop = state.loop;
   const pct = loop ? loop.percentile : null;
-  const banner = g.note
-    ? `<div class="banner">fallback: ${esc(g.note)}</div>` : "";
+  const banner = g.note ? `<div class="banner">fallback: ${esc(g.note)}</div>` : "";
+  const ref = g.reference;
+  const base = loop && loop.baseline;
+  /* These can be the same track — the style reference is the top hit, the baseline is the
+     top hit whose track you did not mark, and those coincide whenever your top hit is one
+     you left unmarked. Two rows for one file is noise, and both would light up as playing
+     at once, so collapse them and say it does both jobs. */
+  const same = base && ref && base.segment_id === ref.segment_id;
 
   p.innerHTML = `<div class="genhead"><h2>Composed</h2>
       <button id="closegen" class="ghost">Close</button></div>
@@ -462,22 +534,40 @@ function showGenerated(g, loop) {
       <div class="bar"><i style="width:${Math.max(1, pct)}%"></i></div>
       <div class="bar baseline"><i style="width:${Math.max(1, loop.baseline_percentile)}%"></i></div>
       <div class="dim" style="font-size:.82em">
-        generated cosine ${loop.cosine} · best human neighbour ${loop.baseline_cosine}
-        (${loop.baseline_percentile.toFixed(0)}th) — grey bar
+        gray bar: the closest human track, ${ordinal(loop.baseline_percentile)} percentile
       </div>` : `<div class="dim">score unavailable</div>`}
+
+      <div class="playrows">
+        ${playRow(g.audio_url, "Generated", g.vocals ? "this take, with vocals" : "this take",
+                  loop ? loop.cosine.toFixed(4) : "", "cosine")}
+        ${base ? playRow(base.audio_url,
+                  same ? "Closest human · also the style reference" : "Closest human",
+                  `${base.artist} — ${base.title}`,
+                  loop.baseline_cosine.toFixed(4), "cosine") : ""}
+        ${ref && !same ? playRow(ref.audio_url, "Style reference",
+                  `${ref.artist} — ${ref.title}`, ref.score.toFixed(4), "to your search") : ""}
+      </div>
+
       <dl class="kv">
         <dt>prompt</dt><dd>${esc(g.prompt)}</dd>
         <dt>bpm / key</dt><dd class="mono">${g.bpm ?? "—"} · ${esc(g.keyscale ?? "—")}</dd>
-        <dt>backend</dt><dd class="mono">${esc(g.backend)}${g.from_bank ? " (pre-baked)" : ""}</dd>
-        <dt>style ref</dt><dd>${g.reference ? esc(g.reference.artist + " — " + g.reference.title) : "—"}</dd>
+        <dt>generator</dt><dd class="mono">${esc(g.backend)}${g.from_bank ? " (pre-baked)" : ""}${g.vocals ? " · vocals" : ""}</dd>
       </dl>
-      <audio controls src="${g.audio_url}" id="genaudio"></audio>
     </div>`;
   p.hidden = false;
-  $("#closegen").onclick = () => (p.hidden = true);
-  // Route the generated track through the same analyser so the A/B comparison is visible.
-  $("#genaudio").addEventListener("play", () => play(g.audio_url, "generated track"));
-  p.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "nearest" });
+  $("#closegen").onclick = () => { state.gen = null; p.hidden = true; };
+}
+
+$("#genpanel").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-play-url]");
+  if (b) play(b.dataset.playUrl, b.dataset.playLabel);
+});
+
+function showGenerated(g, loop) {
+  state.gen = g;
+  state.loop = loop;
+  renderGenPanel();
+  $("#genpanel").scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "nearest" });
 }
 
 /* ------------------------------------------------------------------------ interaction */
@@ -562,6 +652,7 @@ document.addEventListener("keydown", (e) => {
   // Theme is handled before the "no results" guard below — otherwise it would be dead on
   // the empty state, which is exactly when someone first reaches for it.
   if (e.key === "t" || e.key === "T") { toggleTheme(); return; }
+  if (e.key === "v" || e.key === "V") { setVocals(!vocals); return; }
   if (e.key === "b" || e.key === "B") {
     // Cycle through the ones this server can actually do, so B never lands on a dead option.
     const usable = [...document.querySelectorAll("#backends button")]
@@ -611,7 +702,11 @@ document.addEventListener("keydown", (e) => {
     try { stored = localStorage.getItem("vt-backend"); } catch { /* private mode */ }
     // A stored choice only survives if this server can still do it -- otherwise a key that
     // has since been removed would make every Compose fail instead of falling back.
+    vocalsBackends = s.vocals_backends || vocalsBackends;
     setBackend(backendsAvailable[stored] === true ? stored : (s.backend || "local"), true);
+    let storedVocals = null;
+    try { storedVocals = localStorage.getItem("vt-vocals"); } catch { /* private mode */ }
+    setVocals(storedVocals === "1" && canSing(), true);
     $("#status").dataset.worker =
       s.worker === "warming" ? " · warming model…"
       : s.worker === "ready" ? " · model ready"

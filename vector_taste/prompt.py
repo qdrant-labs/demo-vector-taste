@@ -184,8 +184,9 @@ def synthesize(
     negatives: list[Hit] | None = None,
     seed: int | None = None,
     steps: int = 8,
+    vocals: bool = False,
 ) -> Synthesis:
-    """Build ACE-Step parameters from the retrieved neighbourhood plus a user steer.
+    """Build ACE-Step parameters from the retrieved neighborhood plus a user steer.
 
     The user's steer leads: they are steering, and burying their words behind aggregated
     corpus descriptors would invert the co-creation claim this demo makes.
@@ -217,12 +218,13 @@ def synthesize(
         parts.append(f"around {bpm} BPM")
 
     if not parts:
-        parts = ["instrumental music"]
+        parts = ["vocal music" if vocals else "instrumental music"]
 
     # "instrumental, no vocals" only once — the old template appended it while `instrumental`
-    # was also a corpus tag, so some prompts said it twice.
+    # was also a corpus tag, so some prompts said it twice. Skipped entirely when the user
+    # asked for vocals, or the prompt would contradict the request.
     prompt = ", ".join(p for p in parts if p)
-    if "no vocals" not in prompt:
+    if not vocals and "no vocals" not in prompt:
         prompt += ", instrumental, no vocals"
 
     params = GenerationParams(
@@ -242,6 +244,7 @@ def synthesize(
             "tags": tags,
             "descriptors": desc,
             "steer": steer,
+            "vocals": vocals,
             "top_neighbors": [h.label for h in hits[:3]],
         },
     )

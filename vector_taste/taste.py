@@ -210,7 +210,7 @@ def diff(before: list[Hit], after: list[Hit]) -> Diff:
 def format_diff(d: Diff) -> str:
     """Text diff for the CLI. The UI renders the same data.
 
-    Every state carries a text marker, never colour alone — this gets shown on projectors.
+    Every state carries a text marker, never color alone — this gets shown on projectors.
     """
     lines = []
     if not d.changed:

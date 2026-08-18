@@ -18,6 +18,15 @@ and vocals go in `negative_styles`.
 vocal shows up on stage. Measured on real output it holds (generated tracks score higher
 against "instrumental" than against "vocals"), but it is not a flag.
 
+Vocals
+------
+In plan mode a chunk's `text` IS the lyric content, and this demo retrieves sound, not
+words — there are no lyrics to put there. So `vocals=True` asks `POST /v1/music/plan` to
+write a plan from our synthesized prompt, then keeps only its `text` and overlays our own
+styles, negatives, durations and `conditioning_ref`. The taste stays ours; ElevenLabs
+supplies the words. If that call fails the track still generates, from a bare "[Verse]"
+marker plus a "sung vocals" style.
+
 **The seed is NOT reproducible here.** Measured: the same seed produced different audio on
 consecutive calls, which matches ElevenLabs' own caveat that "exact reproducibility is not
 guaranteed". Different seeds do give different output, so it varies the take, but do not
@@ -72,7 +81,9 @@ _uploads: dict[str, str] = {}
 _upload_lock = threading.Lock()
 
 
-def _styles_from(params, negatives: list[str] | None = None) -> tuple[list[str], list[str]]:
+def _styles_from(
+    params, negatives: list[str] | None = None, vocals: bool = False
+) -> tuple[list[str], list[str]]:
     """Split the synthesized prompt into positive styles, and build negative styles.
 
     The prompt is already a comma-separated description built from CLAP descriptors, so it
@@ -80,7 +91,10 @@ def _styles_from(params, negatives: list[str] | None = None) -> tuple[list[str],
     """
     positive = [s.strip() for s in params.prompt.split(",") if s.strip()]
     # The API caps these at 50 each.
-    positive = [p for p in positive if "no vocals" not in p and p != "instrumental"][:50]
+    positive = [p for p in positive if "no vocals" not in p and p != "instrumental"]
+    if vocals:
+        positive.append("sung vocals")
+    positive = positive[:50]
 
     # A rejected track usually shares traits with the accepted ones -- that is why it
     # surfaced in the same result set. Passing those shared traits as negatives would tell
@@ -92,8 +106,12 @@ def _styles_from(params, negatives: list[str] | None = None) -> tuple[list[str],
         n for n in (negatives or [])
         if n.lower() not in pos_text and not any(w in pos_text for w in n.lower().split(" and "))
     ]
-    negative = list(dict.fromkeys(NO_VOCALS + contrasting))[:50]
-    return positive or ["instrumental music"], negative
+    # NO_VOCALS is how instrumental is enforced in plan mode, so it has to go when the user
+    # asked to hear a voice -- otherwise the request wants and forbids singing at once.
+    base = [] if vocals else NO_VOCALS
+    negative = list(dict.fromkeys(base + contrasting))[:50]
+    default = ["vocal music"] if vocals else ["instrumental music"]
+    return positive or default, negative
 
 
 def upload_reference(path: Path, key: str) -> str | None:
@@ -129,30 +147,100 @@ def upload_reference(path: Path, key: str) -> str | None:
     return song_id
 
 
-def build_plan(params, song_id: str | None, negatives: list[str] | None = None) -> dict:
-    """One-chunk composition plan. Plan mode is required for seed AND conditioning."""
-    positive, negative = _styles_from(params, negatives)
-    duration = int(
-        min(max(params.audio_duration * 1000, CHUNK_MIN_MS), CHUNK_MAX_MS)
-    )
-    chunk: dict = {
-        "text": "[Instrumental]",       # the only lever for instrumental in plan mode
-        "duration_ms": duration,
-        "positive_styles": positive,
-        "negative_styles": negative,
-        "context_adherence": "high",
-    }
-    if song_id:
-        chunk["conditioning_ref"] = {
-            "song_id": song_id,
-            "range": {"start_ms": 0, "end_ms": min(duration, MAX_REF_MS)},
+def plan_with_lyrics(params, key: str) -> list[dict] | None:
+    """Ask ElevenLabs to write a plan -- lyrics included -- and return its chunks.
+
+    In plan mode a chunk's `text` IS the lyric content, and we have CLAP descriptors rather
+    than words. This endpoint is the only way to get real lines while keeping the seed and
+    audio conditioning that only plan mode offers.
+
+    Returns None on any failure. A missing set of lyrics must not cost the whole track --
+    build_plan() falls back to a bare section marker, same rule as upload_reference().
+    """
+    import httpx
+
+    try:
+        r = httpx.post(
+            f"{API}/music/plan",
+            headers={"xi-api-key": key, "Content-Type": "application/json"},
+            json={
+                # The planner follows the prompt, and ours describes SOUND -- descriptors
+                # from CLAP, nothing about a voice. Measured: it answered "[Intro]" and
+                # "[Groove]" with no words at all. Asking for lyrics outright is what makes
+                # this endpoint return any.
+                "prompt": f"{params.prompt}. A song with sung vocals: "
+                          f"write lyrics for every section."[:4100],
+                "music_length_ms": _clamp_ms(params.audio_duration),
+                "model_id": MODEL,
+            },
+            timeout=120,
+        )
+        r.raise_for_status()
+        chunks = r.json().get("chunks")
+    except Exception as exc:  # noqa: BLE001
+        log.warning("lyric plan failed (%s); using a bare section marker", exc)
+        return None
+
+    # music_v1 answers with the older `sections` shape instead of `chunks`. Anything without
+    # chunks is not a plan we can overlay onto, so treat it as a miss rather than guessing.
+    if not isinstance(chunks, list) or not chunks:
+        log.warning("lyric plan returned no chunks; using a bare section marker")
+        return None
+    return chunks
+
+
+def _clamp_ms(seconds: float) -> int:
+    return int(min(max(seconds * 1000, CHUNK_MIN_MS), CHUNK_MAX_MS))
+
+
+def build_plan(
+    params,
+    song_id: str | None,
+    negatives: list[str] | None = None,
+    vocals: bool = False,
+    lyric_chunks: list[dict] | None = None,
+) -> dict:
+    """Composition plan. Plan mode is required for seed AND conditioning.
+
+    Instrumental is one chunk saying so. Vocals keep the TEXT of whatever ElevenLabs wrote
+    (that is the lyrics) while everything else -- styles, negatives, durations, conditioning
+    -- is ours, because the taste is the thing being demonstrated, not their plan.
+    """
+    positive, negative = _styles_from(params, negatives, vocals)
+    duration = _clamp_ms(params.audio_duration)
+
+    if vocals:
+        texts = [c.get("text") or "[Verse]" for c in (lyric_chunks or [])] or ["[Verse]"]
+    else:
+        texts = ["[Instrumental]"]      # the only lever for instrumental in plan mode
+
+    # Split our duration across however many chunks came back, so a multi-section plan does
+    # not silently multiply the length we asked for.
+    each = max(CHUNK_MIN_MS, duration // len(texts))
+    chunks: list[dict] = [
+        {
+            "text": text[:6000],
+            "duration_ms": min(each, CHUNK_MAX_MS),
+            "positive_styles": positive,
+            "negative_styles": negative,
+            "context_adherence": "high",
         }
-        chunk["condition_strength"] = os.getenv("ELEVENLABS_CONDITION_STRENGTH", "medium")
-    return {"chunks": [chunk]}
+        for text in texts
+    ]
+
+    if song_id:
+        # First chunk only: the spec says it "will influence the generation of all
+        # subsequent chunks", so repeating the reference buys nothing.
+        chunks[0]["conditioning_ref"] = {
+            "song_id": song_id,
+            "range": {"start_ms": 0, "end_ms": min(chunks[0]["duration_ms"], MAX_REF_MS)},
+        }
+        chunks[0]["condition_strength"] = os.getenv("ELEVENLABS_CONDITION_STRENGTH", "medium")
+    return {"chunks": chunks}
 
 
 def compose(params, out: Path, reference_audio: Path | None = None,
-            negatives: list[str] | None = None) -> Path:
+            negatives: list[str] | None = None, vocals: bool = False) -> Path:
     """Generate a track. Synchronous: the response body IS the audio.
 
     Registers an aborter so the Stop button works on this backend too -- without it, Stop
@@ -173,7 +261,12 @@ def compose(params, out: Path, reference_audio: Path | None = None,
     PROGRESS.update(backend="elevenlabs", desc="uploading reference", phase="preparing")
 
     song_id = upload_reference(reference_audio, key) if reference_audio else None
-    plan = build_plan(params, song_id, negatives)
+
+    lyric_chunks = None
+    if vocals:
+        PROGRESS.update(desc="writing lyrics")
+        lyric_chunks = plan_with_lyrics(params, key)
+    plan = build_plan(params, song_id, negatives, vocals, lyric_chunks)
 
     body = {"model_id": MODEL, "seed": int(params.seed), "composition_plan": plan}
 
@@ -185,7 +278,9 @@ def compose(params, out: Path, reference_audio: Path | None = None,
     register_aborter(lambda: (cancel.set(), True)[1])
     PROGRESS.update(
         phase="generating",
-        desc="generating" + (" (style-conditioned)" if song_id else ""),
+        desc="generating"
+        + (" with vocals" if vocals else "")
+        + (" (style-conditioned)" if song_id else ""),
     )
 
     chunks: list[bytes] = []

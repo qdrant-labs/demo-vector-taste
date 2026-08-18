@@ -162,7 +162,11 @@ def cmd_generate(args):
     # A cached prompt is reused only when pinning the seed. Otherwise every run must
     # re-synthesize so it picks up a NEW seed -- reusing the cache would replay the
     # previous take.
+    # A cached prompt was built for one vocal setting; reusing it across the toggle would
+    # silently generate the other one.
     synth = load_prompt(profile.hash) if (args.seed or args.reproducible) else None
+    if synth is not None and bool(synth.evidence.get("vocals")) != bool(args.vocals):
+        synth = None
     if synth is not None:
         synth.params.seed = _resolve_seed(args, profile.hash)
     if synth is None:
@@ -171,10 +175,11 @@ def cmd_generate(args):
             negatives=negative_hits(profile),
             seed=_resolve_seed(args, profile.hash),
             steps=args.steps,
+            vocals=args.vocals,
         )
         save(profile.hash, synth)
 
-    # Reference clip: a 30s window centred on the WINNING chunk, not the raw segment.
+    # Reference clip: a 30s window centered on the WINNING chunk, not the raw segment.
     # Retrieval scored the segment by its best chunk, so handing the model the whole segment
     # could condition it on the intro that did not match.
     ref = None
@@ -186,10 +191,11 @@ def cmd_generate(args):
     centroid = taste_centroid(profile) if profile.positives else None
     res = generate(
         synth.params, profile.hash, reference_audio=ref,
-        backend=args.backend, centroid=centroid,
+        backend=args.backend, centroid=centroid, vocals=args.vocals,
     )
     _p("")
     _p(f"  backend    {res.backend}{'  (from bank)' if res.from_bank else ''}")
+    _p(f"  vocals     {'yes' if args.vocals else 'no (instrumental)'}")
     _p(f"  reference  {ref.name if ref else '(none)'}")
     _p(f"  audio      {res.path}")
     if res.note:
@@ -209,7 +215,7 @@ def _resolve_seed(args, profile_hash: str) -> int:
 
 
 def _reference_clip(hit) -> Path | None:
-    """Extract a 30s window centred on the hit's winning chunk."""
+    """Extract a 30s window centered on the hit's winning chunk."""
     import numpy as np
     import soundfile as sf
 
@@ -224,9 +230,9 @@ def _reference_clip(hit) -> Path | None:
         return None
 
     wav = load_audio(src)
-    centre = int(hit.start_sec + 5) * SAMPLE_RATE  # middle of the 10s winning chunk
+    center = int(hit.start_sec + 5) * SAMPLE_RATE  # middle of the 10s winning chunk
     half = 15 * SAMPLE_RATE
-    start = max(0, centre - half)
+    start = max(0, center - half)
     clip = wav[start : start + 2 * half]
     if len(clip) < SAMPLE_RATE:
         return None
@@ -404,6 +410,8 @@ def main(argv=None) -> int:
     g.add_argument("--reproducible", action="store_true",
                    help="derive the seed from the taste instead of composing anew")
     g.add_argument("--no-reference", action="store_true")
+    g.add_argument("--vocals", action="store_true",
+                   help="sing rather than play (elevenlabs only)")
     g.set_defaults(func=cmd_generate)
 
     bk = sub.add_parser("bake", help="pre-generate the bank")

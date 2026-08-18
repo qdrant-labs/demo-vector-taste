@@ -62,7 +62,7 @@ def register_aborter(fn: Callable[[], bool] | None) -> None:
 
     Each backend knows its own cancellation: ACE-Step kills its worker process, a hosted
     backend closes its HTTP client. Registering `None` clears it, so Stop after a run has
-    finished reports "nothing was generating" rather than cancelling the next one.
+    finished reports "nothing was generating" rather than canceling the next one.
     """
     global _aborter
     with _abort_lock:

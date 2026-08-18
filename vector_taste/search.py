@@ -25,7 +25,7 @@ from .embed import embed_audio_file, embed_text
 EXACT = models.SearchParams(exact=True)
 
 # Excludes generated tracks from retrieval. Without this, generated points become search
-# neighbours on the second run and quietly shift every score.
+# neighbors on the second run and quietly shift every score.
 NOT_GENERATED = models.Filter(
     must_not=[
         models.FieldCondition(key="is_generated", match=models.MatchValue(value=True))
@@ -53,7 +53,7 @@ class Hit:
 # Cap on results from any one artist.
 #
 # Without this the top 10 is routinely 8 tracks by the same artist — which is a *correct*
-# nearest-neighbour result, since one artist's catalogue really does share production,
+# nearest-neighbor result, since one artist's catalog really does share production,
 # instrumentation and mix, but it reads as a bug on screen and it hides what a negative
 # example actually did. Artist diversification is standard practice in music retrieval.
 # Set max_per_artist=None to see the raw ranking.
@@ -98,7 +98,7 @@ def _to_hits(groups, max_per_artist: int | None = MAX_PER_ARTIST) -> list[Hit]:
     return kept
 
 
-# Over-fetch before the per-artist cap, or a catalogue-heavy artist eats the whole page and
+# Over-fetch before the per-artist cap, or a catalog-heavy artist eats the whole page and
 # we return 3 results when 10 were asked for.
 OVERFETCH = 6
 

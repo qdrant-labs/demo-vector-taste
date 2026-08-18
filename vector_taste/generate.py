@@ -185,6 +185,12 @@ def bank_add(
     return dest
 
 
+# Which backends can sing. Instrumental is enforced backend-side everywhere else: ACE-Step
+# is driven with instrumental=True and has no lyrics source, so offering vocals there would
+# produce wordless syllables and misrepresent what it does.
+VOCALS_BACKENDS = frozenset({"elevenlabs"})
+
+
 def available_backends() -> dict[str, bool]:
     """Which backends can run, so the UI can disable rather than fail on click."""
     from .elevenlabs import is_available as el_available
@@ -241,12 +247,13 @@ def _generate_elevenlabs(
     reference_audio: Path | None,
     out: Path,
     negatives: list[str] | None = None,
+    vocals: bool = False,
 ) -> Path:
     """Hosted generation in seconds. Supports a real seed AND style conditioning."""
     from .elevenlabs import ElevenLabsError, _Aborted, compose
 
     try:
-        return compose(params, out, reference_audio, negatives)
+        return compose(params, out, reference_audio, negatives, vocals)
     except _Aborted as exc:
         raise GenerationAborted("generation aborted") from exc
     except ElevenLabsError as exc:
@@ -286,9 +293,14 @@ def generate(
     out_dir: Path | None = None,
     centroid=None,
     negatives: list[str] | None = None,
+    vocals: bool = False,
 ) -> Generated:
     """Generate, or return the closest banked track. Never raises for a missing backend."""
     backend = backend or GEN_BACKEND
+    if vocals and backend not in VOCALS_BACKENDS:
+        # Silently dropping this would hand back an instrumental with no hint that the
+        # request was ignored. Callers check VOCALS_BACKENDS first.
+        raise GenerationError(f"backend {backend!r} cannot generate vocals")
     # Live output goes to generated/, NOT the curated bank. Each compose is a new file
     # named by its seed, so composing the same taste twice keeps both takes rather than
     # overwriting one with the other.
@@ -323,14 +335,14 @@ def generate(
         if backend in ("local", "modal"):
             path = _generate_local(params, reference_audio, out, profile_hash)
         elif backend == "elevenlabs":
-            path = _generate_elevenlabs(params, reference_audio, out, negatives)
+            path = _generate_elevenlabs(params, reference_audio, out, negatives, vocals)
         elif backend == "replicate":
             path = _generate_replicate(params, out)
         else:
             raise GenerationError(f"unknown GEN_BACKEND {backend!r}")
         # Deliberately NOT written into the bank. The bank is a curated stage asset built
         # by `vt bake`; if every live compose registered itself there, the next lookup would
-        # find it and start replaying old takes -- the exact behaviour being fixed.
+        # find it and start replaying old takes -- the exact behavior being fixed.
         return Generated(path, backend, params, from_bank=False)
     except GenerationAborted:
         # Propagate past the bank fallback below: an abort is a deliberate user action, not

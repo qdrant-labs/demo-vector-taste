@@ -3,8 +3,8 @@
  * Dark-first, per the brand. Two constraints shape the deviations from a normal web UI:
  *
  * 1. This gets projected. Type is larger than the brand's marketing scale (brand ratios,
- *    weights, colours and 8px grid are followed; absolute sizes are not), and every state
- *    that uses colour also carries a text marker — a projector washes colour out, and some
+ *    weights, colors and 8px grid are followed; absolute sizes are not), and every state
+ *    that uses color also carries a text marker — a projector washes color out, and some
  *    of the audience will not distinguish red from green.
  * 2. It must run with no network. Fonts are self-hosted, never imported from a CDN.
  */
@@ -43,8 +43,8 @@
   --violet: #6047FF;           /* secondary/500 */
 
   /* Semantic roles.
-     Red is the CTA colour, so it is deliberately NOT reused for "reject" — two meanings on
-     one colour in the same view is worse than a slightly unexpected hue. */
+     Red is the CTA color, so it is deliberately NOT reused for "reject" — two meanings on
+     one color in the same view is worse than a slightly unexpected hue. */
   --pos: #009688;              /* teal/500   — more like this */
   --neg: #FF9800;              /* orange/500 — less like this */
   --info: #03A9F4;             /* lightBlue/500 — moved up */
@@ -178,7 +178,7 @@ kbd {
   padding: 1px 6px;
   color: var(--dim);
 }
-/* On the red CTA a dim-grey kbd reads as an empty box. */
+/* On the red CTA a dim-gray kbd reads as an empty box. */
 button.primary kbd {
   color: #FFFFFF;
   border-color: rgba(255, 255, 255, 0.55);
@@ -214,7 +214,7 @@ button.primary kbd {
 #seek {
   flex: 1;
   min-width: 0;
-  accent-color: var(--accent);   /* native range styling, brand-coloured */
+  accent-color: var(--accent);   /* native range styling, brand-colored */
   height: 4px;
   cursor: pointer;
 }
@@ -259,7 +259,7 @@ button.primary kbd {
 .acts { display: flex; gap: var(--s1); align-items: center; }
 
 /* Segmented generator toggle. Selected state carries a filled background AND
-   aria-checked, so it is not conveyed by colour alone on a washed-out projector. */
+   aria-checked, so it is not conveyed by color alone on a washed-out projector. */
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
 .seg button {
   border: 0;
@@ -370,7 +370,7 @@ button.danger kbd { color: inherit; border-color: currentColor; }
 .mark button.on-pos { background: var(--pos); border-color: var(--pos); color: #FFFFFF; }
 .mark button.on-neg { background: var(--neg); border-color: var(--neg); color: #0B0F19; }
 
-/* Diff markers. The text label carries the meaning; colour only reinforces it. */
+/* Diff markers. The text label carries the meaning; color only reinforces it. */
 .tag {
   font: 600 0.72em var(--font-mono);
   padding: 2px 8px;
@@ -442,6 +442,43 @@ button.danger kbd { color: inherit; border-color: currentColor; }
 .bar > i { display: block; height: 100%; background: var(--accent); }
 .bar.baseline > i { background: var(--dim); }
 
+/* The A/B: the take, the closest human track, and the clip that conditioned it. One row
+   each, all driven by the single sticky transport above — there is deliberately no second
+   <audio controls> here, because two elements on one URL played the track twice. */
+.playrows { display: flex; flex-direction: column; gap: var(--s1); margin: var(--s2) 0; }
+.playrow {
+  display: grid;
+  grid-template-columns: 2.2rem 1fr auto;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  text-align: left;
+  padding: var(--s1) var(--s2);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.playrow:hover { border-color: var(--dim); }
+.playrow .rowplay {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 1.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 0.8em;
+}
+.playrow.playing { border-color: var(--accent); }
+.playrow.playing .rowplay { background: var(--accent); border-color: var(--accent); color: #FFFFFF; }
+.playrow-meta { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+/* The kind is what the audience needs to read from the back of the room; the track name is
+   supporting detail, so it gets the smaller, dimmer line. */
+.playrow-kind { font-size: 0.95em; font-weight: 600; }
+.playrow-label {
+  color: var(--dim);
+  font: 400 0.8em var(--font-mono);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.playrow-score { font-size: 0.85em; white-space: nowrap; }
+
 .banner {
   border: 1px solid var(--neg);
   color: var(--neg);
@@ -460,7 +497,6 @@ button.danger kbd { color: inherit; border-color: currentColor; }
   padding: var(--s2) var(--s3);
   z-index: 10;
 }
-audio { width: 100%; margin-top: var(--s1); }
 
 /* ---------------------------------------------------------------------- responsive */
 @media (max-width: 640px) {
