@@ -746,3 +746,31 @@ def test_every_archive_has_a_url_and_a_size():
     for name, (url, size) in FMA_ARCHIVES.items():
         assert url.startswith("https://") and url.endswith(f"fma_{name}.zip")
         assert size > 1e9
+
+
+def test_marking_a_negative_before_any_positive_does_not_explode():
+    """The diff baseline is the POSITIVES-ONLY ranking. With no positives that profile is
+    empty, and recommend() rightly refuses an empty profile -- so clicking "-" on a track
+    before ever clicking "+" returned a 500 from /api/taste.
+
+    A negatives-only query is perfectly valid and still returns results; there is simply
+    nothing to diff it against yet, so `diff` stays None.
+    """
+    import inspect
+
+    from vector_taste.ui import app as ui
+
+    src = inspect.getsource(ui.taste)
+    # The guard must require BOTH, not just negatives.
+    assert "if req.negatives and req.positives:" in src
+    assert "if req.negatives:\n        before" not in src
+
+
+def test_an_empty_profile_is_still_refused_by_recommend():
+    """The guard above is in the caller; recommend() itself should keep rejecting nonsense."""
+    import pytest
+
+    from vector_taste.taste import TasteProfile, recommend
+
+    with pytest.raises(ValueError, match="no examples"):
+        recommend(TasteProfile([], [], ""))

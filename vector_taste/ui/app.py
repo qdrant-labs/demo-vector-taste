@@ -213,7 +213,11 @@ def taste(req: TasteReq):
         "diff": None,
     }
 
-    if req.negatives:
+    # Needs positives AND negatives. The baseline is the positives-only ranking, and with no
+    # positives that profile is empty -- which recommend() rightly refuses, so marking "-"
+    # before ever marking "+" used to 500. A negatives-only query still works and is still
+    # useful; there is simply nothing to diff it against yet.
+    if req.negatives and req.positives:
         before = recommend(TasteProfile(req.positives, [], req.steer), limit=req.limit)
         d = diff(before, after)
         payload["diff"] = {
