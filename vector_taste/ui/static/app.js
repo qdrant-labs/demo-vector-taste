@@ -117,6 +117,38 @@ audioEl.addEventListener("ended", () => { stopViz(); state.playing = null; syncT
 audioEl.addEventListener("pause", () => { stopViz(); syncTransport(); render(); });
 audioEl.addEventListener("play", () => { syncTransport(); render(); });
 
+/* --------------------------------------------------------------------- icons + mode */
+/* One place that builds an icon, so the sprite ids never drift across templates. */
+const icon = (name, cls = "") => `<svg class="i ${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+
+/* Density. Desktop by default -- <head> already applied it before first paint, so this only
+   handles switching and persistence, exactly like toggleTheme(). */
+function currentMode() {
+  return document.documentElement.dataset.mode === "present" ? "present" : "desktop";
+}
+
+function renderModes() {
+  const m = currentMode();
+  for (const b of document.querySelectorAll("#modes button")) {
+    b.setAttribute("aria-checked", String(b.dataset.mode === m));
+  }
+}
+
+function setMode(name, quiet) {
+  document.documentElement.dataset.mode = name === "present" ? "present" : "desktop";
+  try { localStorage.setItem("vt-mode", currentMode()); } catch { /* private mode */ }
+  renderModes();
+  if (!quiet) {
+    toast(currentMode() === "present"
+      ? "presentation mode — large, stripped back" : "desktop mode — dense, full detail", 2000);
+  }
+}
+
+document.querySelector("#modes").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-mode]");
+  if (b) setMode(b.dataset.mode);
+});
+
 /* ------------------------------------------------------------------- generator toggle */
 /* Which backend composes. Sent per-request, so switching takes effect on the NEXT compose
    with no server restart.
@@ -246,7 +278,9 @@ function togglePlay() {
 let seeking = false;
 function syncTransport() {
   const playing = audioEl.src && !audioEl.paused;
-  $("#playpause").textContent = playing ? "Pause" : "Play";
+  // Swap the sprite reference rather than the text: this button is icon-only now.
+  $("#playpause").querySelector("use")
+    .setAttribute("href", playing ? "#i-pause" : "#i-play");
   const cur = audioEl.currentTime || 0;
   const dur = Number.isFinite(audioEl.duration) ? audioEl.duration : 0;
   $("#time").textContent = `${fmtTime(cur)} / ${fmtTime(dur)}`;
@@ -330,8 +364,8 @@ function rowHtml(h, i, dropped) {
   <div class="${cls}" data-i="${i}" data-id="${h.point_id}" data-url="${h.audio_url}"
        tabindex="0" role="button" aria-current="${state.cursor === i}"
        aria-label="${h.artist} — ${h.title}">
-    <button class="rowplay" data-play="1" aria-label="${isPlaying ? "Pause" : "Play"} ${esc(h.title)}"
-            title="${isPlaying ? "Pause" : "Play"}">${isPlaying ? "❚❚" : "▶"}</button>
+    <button class="rowplay icon" data-play="1" aria-label="${isPlaying ? "Pause" : "Play"} ${esc(h.title)}"
+            title="${isPlaying ? "Pause" : "Play"}">${icon(isPlaying ? "pause" : "play")}</button>
     <div class="rank">${dropped ? "—" : i + 1}</div>
     <div class="meta">
       <div class="name">${esc(h.artist)} — ${esc(h.title)}
@@ -375,7 +409,8 @@ function render() {
 
 const chip = (h, kind) => `<span class="chip ${kind}">
   <span class="sign">${kind === "pos" ? "+" : "−"}</span>${esc(h.artist)} — ${esc(h.title)}
-  <button data-unchip="${h.point_id}" aria-label="Remove">×</button></span>`;
+  <button data-unchip="${h.point_id}" class="icon" aria-label="Remove ${esc(h.title)}"
+          title="Remove">${icon("x")}</button></span>`;
 
 const esc = (s) => String(s ?? "").replace(/[<>&"]/g, (c) =>
   ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
@@ -406,15 +441,16 @@ function renderClips() {
     const on = state.playing === c.audio_url && !audioEl.paused;
     return `
     <div class="playrow clip${on ? " playing" : ""}">
-      <button class="rowplay" data-clip-play="${esc(c.audio_url)}"
-              aria-label="${on ? "Pause" : "Play"} ${esc(c.title)}">${on ? "❚❚" : "▶"}</button>
+      <button class="rowplay icon" data-clip-play="${esc(c.audio_url)}"
+              aria-label="${on ? "Pause" : "Play"} ${esc(c.title)}">${icon(on ? "pause" : "play")}</button>
       <span class="playrow-meta">
         <span class="playrow-kind">${esc(c.title)}</span>
         <span class="playrow-label">${c.points} chunks · ${c.bpm ?? "—"} BPM · ${esc(c.key ?? "—")}</span>
       </span>
       <span class="clip-acts">
         <button data-clip-similar="${esc(c.track_id)}" class="ghost">Find similar</button>
-        <button data-clip-remove="${esc(c.track_id)}" class="ghost" aria-label="Remove">×</button>
+        <button data-clip-remove="${esc(c.track_id)}" class="ghost icon"
+                aria-label="Remove ${esc(c.title)}" title="Remove">${icon("x")}</button>
       </span>
     </div>`;
   }).join("");
@@ -447,10 +483,10 @@ async function uploadFiles(files) {
   if (!list.length) return;
   const btn = $("#uploadbtn");
   btn.disabled = true;
-  const was = btn.textContent;
+  btn.classList.add("busy");
   let last = null;
   for (const f of list) {
-    btn.textContent = `embedding ${f.name.slice(0, 18)}…`;
+    btn.title = `embedding ${f.name.slice(0, 24)}…`;
     const body = new FormData();
     body.append("file", f);
     try {
@@ -462,7 +498,9 @@ async function uploadFiles(files) {
             + (j.truncated ? " (truncated to 5 min)" : ""), 4000);
     } catch (e) { toast(`${f.name}: ${e.message}`, 6000); }
   }
-  btn.disabled = false; btn.textContent = was;
+  btn.disabled = false;
+  btn.classList.remove("busy");
+  btn.title = "Add your own audio and find its neighbors";
   await loadClips();
   // Answer the question the upload was asking, without making them click again.
   if (last) findSimilar(last.track_id);
@@ -533,7 +571,7 @@ async function api(path, body) {
 async function doSearch() {
   const text = $("#q").value.trim();
   if (!text) return;
-  $("#go").disabled = true; $("#go").textContent = "…";
+  $("#go").disabled = true; $("#go").classList.add("busy");
   try {
     const { hits } = await api("/api/search", { text, limit: 12 });
     state.hits = hits; state.diff = null; state.cursor = hits.length ? 0 : -1;
@@ -543,7 +581,7 @@ async function doSearch() {
     render();
     if (!hits.length) toast("no results");
   } catch (e) { toast("search failed: " + e.message); }
-  finally { $("#go").disabled = false; $("#go").textContent = "Search"; }
+  finally { $("#go").disabled = false; $("#go").classList.remove("busy"); }
 }
 
 async function refreshTaste() {
@@ -664,7 +702,7 @@ function playRow(url, kind, label, score, note) {
   return `
   <button class="playrow${on ? " playing" : ""}" data-play-url="${esc(url)}"
           data-play-label="${esc(label)}" aria-label="${on ? "Pause" : "Play"} ${esc(label)}">
-    <span class="rowplay" aria-hidden="true">${on ? "❚❚" : "▶"}</span>
+    <span class="rowplay" aria-hidden="true">${icon(on ? "pause" : "play")}</span>
     <span class="playrow-meta">
       <span class="playrow-kind">${esc(kind)}</span>
       <span class="playrow-label">${esc(label)}</span>
@@ -673,8 +711,8 @@ function playRow(url, kind, label, score, note) {
   </button>`;
 }
 
-/* Split out of showGenerated so render() can redraw it: the ▶/❚❚ on each row has to follow
-   playback, and render() already runs on every play, pause and ended. */
+/* Split out of showGenerated so render() can redraw it: the play/pause icon on each row has
+   to follow playback, and render() already runs on every play, pause and ended. */
 function renderGenPanel() {
   const p = $("#genpanel");
   const g = state.gen;
@@ -691,7 +729,7 @@ function renderGenPanel() {
   const same = base && ref && base.segment_id === ref.segment_id;
 
   p.innerHTML = `<div class="genhead"><h2>Composed</h2>
-      <button id="closegen" class="ghost">Close</button></div>
+      <button id="closegen" class="ghost icon" aria-label="Close" title="Close">${icon("x")}</button></div>
     <div id="genbody">
       ${banner}
       ${pct !== null ? `
@@ -821,6 +859,10 @@ document.addEventListener("keydown", (e) => {
   // Theme is handled before the "no results" guard below — otherwise it would be dead on
   // the empty state, which is exactly when someone first reaches for it.
   if (e.key === "t" || e.key === "T") { toggleTheme(); return; }
+  if (e.key === "m" || e.key === "M") {
+    setMode(currentMode() === "present" ? "desktop" : "present");
+    return;
+  }
   if (e.key === "v" || e.key === "V") { setVocals(!vocals); return; }
   if (e.key === "b" || e.key === "B") {
     // Cycle through the ones this server can actually do, so B never lands on a dead option.
