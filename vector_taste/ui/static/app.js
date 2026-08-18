@@ -931,6 +931,14 @@ document.addEventListener("keydown", (e) => {
 (async function boot() {
   try {
     const s = await fetch("/api/status").then((r) => r.json());
+    // If the page was loaded from a stale cache its code will not match what the server is
+    // serving, and every fix will look like it did not land. Say so instead of leaving
+    // someone debugging a version they are not running.
+    const mine = document.body.dataset.build;
+    if (s.build && mine && s.build !== mine) {
+      toast("This page is out of date — reload to get the current version", 60000);
+      $("#status").dataset.stale = "1";
+    }
     backendsAvailable = s.backends || {};
     let stored = null;
     try { stored = localStorage.getItem("vt-backend"); } catch { /* private mode */ }

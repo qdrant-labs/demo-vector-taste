@@ -831,3 +831,39 @@ def test_the_ui_shell_and_assets_are_not_heuristically_cacheable():
         assert asset.headers.get("etag")
         again = c.get("/static/app.js", headers={"If-None-Match": asset.headers["etag"]})
         assert again.status_code == 304 and not again.content
+
+
+def test_assets_are_cache_busted_and_the_page_can_detect_its_own_staleness():
+    """no-store fixes tabs opened from now on, but a cache entry poisoned BEFORE it shipped
+    has no validators, so a browser can keep reusing it and its old app.js through ordinary
+    reloads. A changing query string is a URL the cache has never seen, which is the only
+    thing that reliably breaks that. The build stamp then lets a loaded page notice it is
+    running code the server no longer serves -- otherwise every fix looks like it failed.
+    """
+    from fastapi.testclient import TestClient
+
+    from vector_taste.ui.app import app, build_id
+
+    v = build_id()
+    with TestClient(app) as c:
+        html = c.get("/").text
+        assert f'/static/app.js?v={v}' in html
+        assert f'/static/app.css?v={v}' in html
+        assert f'<body data-build="{v}"' in html
+        assert c.get("/api/status").json()["build"] == v
+
+
+def test_the_build_id_changes_when_the_front_end_changes(tmp_path, monkeypatch):
+    import os
+
+    from vector_taste.ui import app as ui
+
+    before = ui.build_id()
+    js = ui.STATIC / "app.js"
+    stat = js.stat()
+    try:
+        os.utime(js, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+        assert ui.build_id() != before
+    finally:
+        os.utime(js, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    assert ui.build_id() == before

@@ -65,6 +65,22 @@ class TasteReq(BaseModel):
     reproducible: bool = False
 
 
+def build_id() -> str:
+    """Fingerprint of the front-end files, recomputed per request.
+
+    Used to cache-bust the asset URLs and to let a loaded page notice it has gone stale.
+    Cheap: three stat() calls, no reads.
+    """
+    import hashlib
+
+    stamp = "".join(
+        f"{f}:{(STATIC / f).stat().st_mtime_ns}"
+        for f in ("index.html", "app.js", "app.css")
+        if (STATIC / f).exists()
+    )
+    return hashlib.sha256(stamp.encode()).hexdigest()[:12]
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     # no-store on the shell, and see _no_cache_static below for the assets.
@@ -74,10 +90,18 @@ def index():
     # without revalidating. On a demo that is edited while a tab stays open all day, that
     # shows up as a fix that "did not work", because the tab is still running yesterday's
     # JavaScript. Correctness of what you see beats a few bytes of local traffic.
-    return HTMLResponse(
-        (STATIC / "index.html").read_text(),
-        headers={"Cache-Control": "no-store, must-revalidate"},
-    )
+    #
+    # The asset URLs are stamped with build_id() as well. no-store fixes tabs opened from
+    # now on, but a cache entry poisoned BEFORE it shipped has no validators, so a browser
+    # may keep reusing it and its old app.js through ordinary reloads. A changing query
+    # string is a URL the cache has simply never seen, which is the only thing that
+    # reliably breaks that cycle.
+    html = (STATIC / "index.html").read_text()
+    v = build_id()
+    html = html.replace("/static/app.js", f"/static/app.js?v={v}")
+    html = html.replace("/static/app.css", f"/static/app.css?v={v}")
+    html = html.replace("<body>", f'<body data-build="{v}">', 1)
+    return HTMLResponse(html, headers={"Cache-Control": "no-store, must-revalidate"})
 
 
 @app.middleware("http")
@@ -143,6 +167,8 @@ def status():
         "backends": available_backends(),
         # So the UI can disable the vocals toggle rather than fail on Compose.
         "vocals_backends": sorted(VOCALS_BACKENDS),
+        # The page compares this to its own stamp and says so if they differ.
+        "build": build_id(),
     }
 
 
