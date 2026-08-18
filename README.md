@@ -119,6 +119,10 @@ failures at 11.7 tracks/s**, then ingested at ~4 tracks/s into **25,791 points a
 segments by 1,594 artists**. Search stays fast — an exact scan of the whole collection is
 59 ms.
 
+After expanding, **re-run `vt bake`**: retrieval returns different neighbours, so the banked
+audio was generated from prompts the corpus no longer produces. Measured here — the finale
+went 80.9 with the stale bank to 84.7 once it was re-baked against the larger corpus.
+
 **`vt fetch` pulls only the tracks you can actually use.** Downloading `fma_large.zip` to keep
 8,780 of its 106,574 files would discard 92% of a 100 GB transfer — and would not fit on a
 laptop. Instead the ZIP's central directory is read over HTTP Range (4 requests, 8.7 MB), and

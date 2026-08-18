@@ -1,10 +1,10 @@
 {
   "params": {
-    "prompt": "driving electronic beat with heavy bass and synths, in the style of aggressive and intense hip hop electronic, drum machine, heavily distorted and fuzzy, driving and rhythmic, around 117 BPM, instrumental, no vocals",
+    "prompt": "driving electronic beat with heavy bass and synths, in the style of hip hop electronic, around 123 BPM, instrumental, no vocals",
     "lyrics": "",
     "audio_duration": 30.0,
-    "bpm": 117,
-    "keyscale": "F major",
+    "bpm": 123,
+    "keyscale": "G major",
     "timesignature": "4",
     "num_inference_steps": 8,
     "shift": 3.0,
@@ -20,24 +20,17 @@
       "electronic"
     ],
     "descriptors": {
-      "mood": [
-        "aggressive and intense"
-      ],
-      "instrument": [
-        "drum machine"
-      ],
-      "production": [
-        "heavily distorted and fuzzy"
-      ],
-      "texture": [
-        "driving and rhythmic"
-      ]
+      "mood": [],
+      "instrument": [],
+      "production": [],
+      "texture": []
     },
     "steer": "driving electronic beat with heavy bass and synths",
+    "vocals": false,
     "top_neighbors": [
       "Creo \u2014 Dimension",
       "Kellee Maize & J. Glaze & Udachi \u2014 Fact Is Remix (J. Glaze and Udachi Remix)",
-      "Mike B. Fort \u2014 OOOTHERSIDE - Crystal Air"
+      "Mike B. Fort \u2014 A Tear Is Falling Down"
     ]
   }
 }

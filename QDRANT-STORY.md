@@ -167,7 +167,7 @@ on is explicitly indexed for exactly that reason.
 The generated track is embedded with the same CLAP model and **upserted into the same
 collection** it was retrieved from. Then it's ranked against the human corpus.
 
-The headline is a **percentile, not a cosine**: "closer to your taste than 81% of 8,828
+The headline is a **percentile, not a cosine**: "closer to your taste than 85% of 8,828
 corpus segments." A cosine of 0.61 means nothing to an audience and looks identical whether
 the demo worked or not. A percentile is legible and it can be *wrong*, which is what makes it worth
 showing.
@@ -222,7 +222,7 @@ vectors encode what the music actually sounds like.
 | Search mode | `exact=True` — an HNSW graph exists, but the forced full scan keeps a rehearsed demo reproducible. 59 ms over 25,791 points |
 | Rows that move on one +/− click | 2–8 of 12 |
 | Max-sim vs mean-pooled, real group | 0.4690 vs 0.3938 |
-| Generated track, typical result | ~81st percentile of 8,828 human segments |
+| Generated track, typical result | ~85th percentile of 8,828 human segments |
 | Closest human track (the baseline) | ~0.85 cosine |
 | Corpus growth | 1,005 → 8,780 tracks, fetched selectively over HTTP Range (~7 GB, not 100 GB) |
 

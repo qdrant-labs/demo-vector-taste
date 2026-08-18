@@ -1,7 +1,7 @@
 {
   "2a5559afa725": {
     "backend": "local",
-    "bpm": 108,
+    "bpm": 123,
     "centroid": [
       -0.083169,
       0.007819,
@@ -518,13 +518,13 @@
     ],
     "duration": 30.0,
     "file": "2a5559afa725.wav",
-    "keyscale": "G major",
-    "prompt": "dreamy lo-fi hip hop with vinyl crackle and mellow keys, in the style of hypnotic and trance-like hip hop electronic, hand percussion, lo-fi and tape-saturated, syncopated and groovy, around 108 BPM, instrumental, no vocals",
+    "keyscale": "D major",
+    "prompt": "dreamy lo-fi hip hop with vinyl crackle and mellow keys, in the style of hip hop electronic, around 123 BPM, instrumental, no vocals",
     "seed": 710236591
   },
   "b07e5152536a": {
     "backend": "local",
-    "bpm": 112,
+    "bpm": 129,
     "centroid": [
       -0.065911,
       -0.013795,
@@ -1041,13 +1041,13 @@
     ],
     "duration": 30.0,
     "file": "b07e5152536a.wav",
-    "keyscale": "G major",
-    "prompt": "warm acoustic guitar, intimate and sparse, in the style of sombre and solemn folk instrumental, grand piano, dry and close-miked, dense and layered, around 112 BPM, instrumental, no vocals",
+    "keyscale": "A major",
+    "prompt": "warm acoustic guitar, intimate and sparse, in the style of folk instrumental, around 129 BPM, instrumental, no vocals",
     "seed": 813584723
   },
   "dc0369f4a0ee": {
     "backend": "local",
-    "bpm": 117,
+    "bpm": 123,
     "centroid": [
       -0.059869,
       0.050944,
@@ -1564,8 +1564,8 @@
     ],
     "duration": 30.0,
     "file": "dc0369f4a0ee.wav",
-    "keyscale": "F major",
-    "prompt": "driving electronic beat with heavy bass and synths, in the style of aggressive and intense hip hop electronic, drum machine, heavily distorted and fuzzy, driving and rhythmic, around 117 BPM, instrumental, no vocals",
+    "keyscale": "G major",
+    "prompt": "driving electronic beat with heavy bass and synths, in the style of hip hop electronic, around 123 BPM, instrumental, no vocals",
     "seed": 1543727605
   }
 }
