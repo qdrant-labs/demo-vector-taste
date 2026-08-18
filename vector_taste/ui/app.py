@@ -67,7 +67,31 @@ class TasteReq(BaseModel):
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return (STATIC / "index.html").read_text()
+    # no-store on the shell, and see _no_cache_static below for the assets.
+    #
+    # This response had no Cache-Control, no ETag and no Last-Modified, which lets a browser
+    # apply HEURISTIC caching: it may reuse the page -- and the app.js referenced from it --
+    # without revalidating. On a demo that is edited while a tab stays open all day, that
+    # shows up as a fix that "did not work", because the tab is still running yesterday's
+    # JavaScript. Correctness of what you see beats a few bytes of local traffic.
+    return HTMLResponse(
+        (STATIC / "index.html").read_text(),
+        headers={"Cache-Control": "no-store, must-revalidate"},
+    )
+
+
+@app.middleware("http")
+async def _no_cache_static(request, call_next):
+    """Force revalidation of /static so an edit is never invisible.
+
+    StaticFiles already sends an ETag, so this costs one conditional request per asset and
+    the answer is usually a 304 with no body. `no-cache` means "revalidate", not "do not
+    cache" -- the bytes are still reused when they have not changed.
+    """
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @app.on_event("startup")

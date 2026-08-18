@@ -804,3 +804,30 @@ def test_the_ui_gates_the_negative_button_and_unstrands_it():
     assert "function dropStrandedNegatives()" in js
     # called from BOTH the row-mark path and the chip-removal path
     assert js.count("dropStrandedNegatives();") >= 2
+
+
+def test_the_ui_shell_and_assets_are_not_heuristically_cacheable():
+    """The shell had no Cache-Control, no ETag and no Last-Modified, which lets a browser
+    apply HEURISTIC caching and reuse both the page and the app.js it references without
+    revalidating. On a demo edited while a tab stays open all day, that presents as a fix
+    that "did not work" -- the tab is running yesterday's JavaScript.
+
+    Checked here because it is invisible from inside the app: everything looks correct
+    server-side while the screen disagrees.
+    """
+    from fastapi.testclient import TestClient
+
+    from vector_taste.ui.app import app
+
+    with TestClient(app) as c:
+        shell = c.get("/")
+        assert shell.status_code == 200
+        assert "no-store" in shell.headers.get("cache-control", "")
+
+        asset = c.get("/static/app.js")
+        assert asset.status_code == 200
+        assert asset.headers.get("cache-control") == "no-cache"
+        # no-cache means "revalidate", not "never reuse" -- the ETag keeps it cheap.
+        assert asset.headers.get("etag")
+        again = c.get("/static/app.js", headers={"If-None-Match": asset.headers["etag"]})
+        assert again.status_code == 304 and not again.content
