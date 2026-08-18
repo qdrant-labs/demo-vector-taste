@@ -178,11 +178,6 @@ kbd {
   padding: 1px 6px;
   color: var(--dim);
 }
-/* On the red CTA a dim-gray kbd reads as an empty box. */
-button.primary kbd {
-  color: #FFFFFF;
-  border-color: rgba(255, 255, 255, 0.55);
-}
 
 /* ------------------------------------------------------------------------ equalizer */
 /* Sticky so the transport stays reachable while scrolling a long result list — on stage
@@ -273,6 +268,13 @@ button.primary kbd {
 .seg button[aria-checked="true"] { background: var(--accent); color: #FFFFFF; font-weight: 600; }
 .seg button:disabled { opacity: 0.4; cursor: not-allowed; }
 .seg button:disabled:hover { background: transparent; }
+/* A disabled option that is also the checked one would render as 40%-opacity brand red,
+   which reads as a broken button rather than an unavailable one. Keep the selection legible
+   but neutral: the accent is reserved for controls you can actually press. */
+.seg button:disabled[aria-checked="true"] {
+  background: var(--panel-2);
+  color: var(--fg);
+}
 
 /* ------------------------------------------------------------------ progress ring */
 /* A ring, not a bar: `.bar` already means score/percentile in the Composed panel, and

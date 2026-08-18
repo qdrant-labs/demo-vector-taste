@@ -11,6 +11,8 @@ const state = {
   playing: null,
   gen: null,        // last /api/generate result, kept so the tile can re-render on play/pause
   loop: null,       // its /api/loop scoring
+  prevOrder: null,  // segment_ids of the list on screen BEFORE the current one
+  moves: null,      // what the last gesture did to the ranking; drives the NEW/UP/DOWN tags
 };
 
 /* ------------------------------------------------------------------ audio + equalizer */
@@ -264,8 +266,32 @@ $("#seek").addEventListener("change", (e) => {
 });
 
 /* --------------------------------------------------------------------------- rendering */
+/* Rank movement caused by the LAST gesture, computed against the list that was on screen
+   before it.
+
+   The server only diffs when a negative is marked, and only ever against positives-only --
+   so marking a positive, marking a second one, or unmarking moved the list with nothing on
+   screen to say so. Measured: those gestures shift 2-8 of 12 rows each.
+
+   Shaped exactly like the server's diff.added/diff.moved so tagFor() reads either. When a
+   negative IS the gesture, the previous list is the positives-only list, so this agrees with
+   the server exactly -- the centerpiece moment is unchanged. */
+function computeMoves(prev, hits) {
+  if (!prev || !prev.length) return null;      // nothing to compare a fresh search against
+  const was = new Map(prev.map((sid, i) => [sid, i]));
+  const added = [];
+  const moved = {};
+  hits.forEach((h, i) => {
+    if (!was.has(h.segment_id)) added.push(h.segment_id);
+    else if (was.get(h.segment_id) !== i) moved[h.segment_id] = [was.get(h.segment_id), i];
+  });
+  return { added, moved };
+}
+
+const orderOf = (hits) => hits.map((h) => h.segment_id);
+
 function tagFor(h) {
-  const d = state.diff;
+  const d = state.moves;
   if (!d) return "";
   if (d.added && d.added.includes(h.segment_id)) return '<span class="tag new">NEW</span>';
   if (d.moved && d.moved[h.segment_id]) {
@@ -378,6 +404,9 @@ async function doSearch() {
   try {
     const { hits } = await api("/api/search", { text, limit: 12 });
     state.hits = hits; state.diff = null; state.cursor = hits.length ? 0 : -1;
+    // No tags on a bare search -- but arm the baseline, so the FIRST mark tags against it.
+    state.moves = null;
+    state.prevOrder = orderOf(hits);
     render();
     if (!hits.length) toast("no results");
   } catch (e) { toast("search failed: " + e.message); }
@@ -391,6 +420,10 @@ async function refreshTaste() {
       positives: [...state.pos.keys()], negatives: [...state.neg.keys()],
       steer: $("#steer").value, limit: 12,
     });
+    // Order matters: compare against the old list BEFORE overwriting it, or every diff
+    // comes back empty.
+    state.moves = computeMoves(state.prevOrder, r.hits);
+    state.prevOrder = orderOf(r.hits);
     state.hits = r.hits; state.diff = r.diff;
     if (state.cursor >= state.hits.length) state.cursor = state.hits.length - 1;
     render();
@@ -460,7 +493,7 @@ function stopComposeProgress() {
   $("#progress").hidden = true;
   $("#acts").hidden = false;
   $("#gen").disabled = false;
-  $("#gen").innerHTML = 'Compose <kbd>G</kbd>';
+  $("#gen").textContent = "Compose";
 }
 
 async function compose() {
