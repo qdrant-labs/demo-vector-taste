@@ -24,8 +24,8 @@ step, and no re-ranking service. Every stage is a query against one Qdrant colle
 
 Music is the ideal subject because **the thing you care about has no words for it.** Nobody
 can type the query that finds "that warm, slightly sad, tape-saturated thing with the piano."
-Tags can't express it — `hip-hop` is 324 of our tracks. Genre is a folder; taste is a
-direction in space.
+Tags can't express it — `electronic` alone is 1,868 of our segments. Genre is a folder; taste
+is a direction in space.
 
 That is the general lesson, and it transfers to anything with the same shape: images, video,
 audio logs, product photos, support calls, code. **When the useful similarity is perceptual
@@ -46,17 +46,18 @@ Three claims the demo makes concrete on stage:
 One collection, `music_segments`.
 
 ```
-3,015 points        one per 10-second audio window
-1,005 segments      the 30-second clips a human actually listens to
-512 dimensions      cosine distance
-2 named vectors     audio + text, same space
-6 payload indexes   segment_id, track_id, artist, tags, bpm, is_generated
+25,791 points       one per 10-second audio window
+ 8,828 segments     the 30-second clips a human actually listens to
+ 1,594 artists
+   512 dimensions   cosine distance
+     2 named vectors   audio + text, same space
+     7 payload indexes segment_id, track_id, artist, tags, bpm, is_generated, is_upload
 ```
 
 **Named vectors** put both modalities in one collection rather than two databases:
 
-- `audio` — on all 3,015 points. The sound itself.
-- `text` — on 1,005 points, one per segment. A caption embedding.
+- `audio` — on all 25,791 points. The sound itself.
+- `text` — one per segment. A caption embedding.
 
 Both are 512-d cosine, because they come from **CLAP**, a joint audio-text model whose two
 towers share one space. (CLAP is an open model, not a Qdrant component — worth naming
@@ -91,10 +92,10 @@ to the 30-second segment **and scores each group by its best member.**
 This is not a convenience — it changes the results. A real group from a live query:
 
 ```
-Little Glass Men — Westside Chillers
-  chunk scores:  0.4274   0.3717   0.1831
-  max-sim:       0.4274   ← what Qdrant returns
-  mean-pooled:   0.3274   ← what you'd get averaging, a 0.10 penalty
+Lee Rosevere — Going Home
+  chunk scores:  0.4690   0.3969   0.3154
+  max-sim:       0.4690   ← what Qdrant returns
+  mean-pooled:   0.3938   ← what you'd get averaging, a 0.08 penalty
 ```
 
 A track whose chorus is a perfect match and whose intro is silence should rank on the chorus.
@@ -166,9 +167,9 @@ on is explicitly indexed for exactly that reason.
 The generated track is embedded with the same CLAP model and **upserted into the same
 collection** it was retrieved from. Then it's ranked against the human corpus.
 
-The headline is a **percentile, not a cosine**: "closer to your taste than 84% of 1,005
-segments." A cosine of 0.61 means nothing to an audience and looks identical whether the demo
-worked or not. A percentile is legible and it can be *wrong*, which is what makes it worth
+The headline is a **percentile, not a cosine**: "closer to your taste than 81% of 8,828
+corpus segments." A cosine of 0.61 means nothing to an audience and looks identical whether
+the demo worked or not. A percentile is legible and it can be *wrong*, which is what makes it worth
 showing.
 
 Three deliberate choices keep that number honest, and they are all Qdrant queries:
@@ -198,8 +199,8 @@ raw vectors never cross the wire; the browser only does the 2-D layout. Colored 
 the clusters separate cleanly:
 
 ```
-hip-hop 324 · electronic 312 · experimental 199 · rock 182
-folk 172 · instrumental 154 · pop 88 · international 69
+electronic 1,868 · rock 1,557 · old-time/historic 1,345 · experimental 990
+classical 975 · hip-hop 947 · pop 754 · instrumental 599 · folk 532
 ```
 
 **Read the picture carefully, because it's the strongest slide in the deck:** those clusters
@@ -213,16 +214,17 @@ vectors encode what the music actually sounds like.
 
 | | |
 |---|---|
-| Points / segments | 3,015 / 1,005 |
+| Points / segments | 25,791 / 8,828 |
 | Vector dimensions | 512, cosine |
 | Named vectors per collection | 2 (`audio`, `text`) |
-| Indexed payload fields | 6 |
+| Indexed payload fields | 7 |
 | Chunk window | 10s (model limit), rolled up to 30s segments |
-| Search mode | exact — at this size Qdrant builds no HNSW graph, so scores are reproducible |
+| Search mode | `exact=True` — an HNSW graph exists, but the forced full scan keeps a rehearsed demo reproducible. 59 ms over 25,791 points |
 | Rows that move on one +/− click | 2–8 of 12 |
-| Max-sim vs mean-pooled, real group | 0.4274 vs 0.3274 |
-| Generated track, typical result | ~84th percentile of 1,005 human segments |
+| Max-sim vs mean-pooled, real group | 0.4690 vs 0.3938 |
+| Generated track, typical result | ~81st percentile of 8,828 human segments |
 | Closest human track (the baseline) | ~0.85 cosine |
+| Corpus growth | 1,005 → 8,780 tracks, fetched selectively over HTTP Range (~7 GB, not 100 GB) |
 
 ---
 
@@ -238,10 +240,12 @@ them into stronger claims:
 - **CLAP is an open third-party model, not a Qdrant feature.** Qdrant stores, indexes,
   filters, groups, recommends, and scores. It does not embed. The pattern works with any
   joint embedder, which is a strength worth saying out loud.
-- **The corpus is small on purpose** — 1,005 segments, CC0/CC-BY only, so every track shown on
-  stage is legally clean. This is a demo of a *pattern*, not a benchmark.
-- **`indexed_vectors_count: 0` in the dashboard is expected**, not a fault: below the indexing
-  threshold Qdrant searches exactly. Don't let it become a slide about performance.
+- **The corpus is CC0/CC-BY only** — 8,780 tracks, every one legally clean, which is why it is
+  8,780 rather than the 106,574 FMA holds. The licence filter is the ceiling, and that is the
+  honest framing: this is a demo of a *pattern*, not a benchmark.
+- **Don't turn `exact=True` into a performance slide.** The demo forces a full scan on purpose,
+  for reproducibility, not because Qdrant needs one. It is 59 ms over 25,791 points; HNSW is
+  there and unused.
 
 ---
 

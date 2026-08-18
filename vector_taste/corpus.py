@@ -29,6 +29,21 @@ from .config import AUDIO, RAW
 FMA_METADATA_URL = "https://os.unil.cloud.switch.ch/fma/fma_metadata.zip"
 FMA_SMALL_URL = "https://os.unil.cloud.switch.ch/fma/fma_small.zip"
 
+# The archives are NESTED: fma_small ⊂ fma_medium ⊂ fma_large, all 30s clips. Sizes measured
+# with a HEAD request, and they are the reason `vt fetch --selective` exists -- we want 8,780
+# of fma_large's 106,574 files, so downloading the whole 100GB would discard 92% of it.
+FMA_ARCHIVES = {
+    "small": ("https://os.unil.cloud.switch.ch/fma/fma_small.zip", 7_679_594_875),
+    "medium": ("https://os.unil.cloud.switch.ch/fma/fma_medium.zip", 23_800_000_000),
+    "large": ("https://os.unil.cloud.switch.ch/fma/fma_large.zip", 100_306_112_191),
+}
+
+# `set.subset` in tracks.csv is an ORDERED category: a track carries the SMALLEST subset it
+# belongs to. FMA's own utilities select with `<=`, so "the large subset" means small +
+# medium + large. Matching a single value exactly (as this once did) silently returned only
+# the 6,435 large-only tracks instead of all 8,780 usable ones.
+SUBSET_ORDER = ["small", "medium", "large"]
+
 # Order matters: deny wins over allow.
 _DENY = re.compile(r"non-?commercial|share.?alike|no.?deriv|sampling", re.IGNORECASE)
 _ALLOW = re.compile(r"\b(cc0|public\s?domain|attribution)\b", re.IGNORECASE)
@@ -101,11 +116,18 @@ def _extract(zip_path: Path, members: list[str], dest: Path) -> None:
 
 
 def load_fma_metadata(limit: int | None = None, subset: str = "small") -> list[dict]:
-    """Parse FMA tracks.csv, keeping only permissively licensed rows in `subset`.
+    """Parse FMA tracks.csv, keeping only permissively licensed rows in `subset` and below.
+
+    CUMULATIVE, per SUBSET_ORDER: `subset="large"` yields small + medium + large. That is
+    what FMA means by a subset, and it is what makes the counts come out at 1,005 / 2,345 /
+    8,780 rather than 1,005 / 1,340 / 6,435.
 
     Reads with csv rather than pandas: tracks.csv is 248MB with a two-row header, and we
     only need six columns.
     """
+    if subset not in SUBSET_ORDER:
+        raise ValueError(f"unknown subset {subset!r}; expected one of {SUBSET_ORDER}")
+    wanted = set(SUBSET_ORDER[: SUBSET_ORDER.index(subset) + 1])
     meta_zip = RAW / "fma_metadata.zip"
     tracks_csv = RAW / "fma_metadata" / "tracks.csv"
     if not tracks_csv.exists():
@@ -130,7 +152,7 @@ def load_fma_metadata(limit: int | None = None, subset: str = "small") -> list[d
 
         out: list[dict] = []
         for row in reader:
-            if not row or row[c_sub] != subset:
+            if not row or row[c_sub] not in wanted:
                 continue
             lic = row[c_lic]
             if not is_permissive(lic):

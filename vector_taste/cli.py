@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from .config import COLLECTION, DATA, GEN_BACKEND, is_cloud
+from .corpus import FMA_ARCHIVES
 
 
 def _p(*a):
@@ -22,7 +23,13 @@ def _p(*a):
 def cmd_fetch(args):
     from .fetch import fetch_all
 
-    fetch_all(audio=not args.metadata_only)
+    fetch_all(
+        audio=not args.metadata_only,
+        subset=args.subset,
+        selective=not args.full_archive,
+        workers=args.workers,
+        limit=args.limit,
+    )
     return 0
 
 
@@ -334,6 +341,35 @@ def cmd_info(args):
     return 0
 
 
+def cmd_corpus(args):
+    """What corpus is available, ingested, and on disk -- without touching the network."""
+    from .corpus import SUBSET_ORDER, fma_audio_path, load_fma_metadata
+    from .store import count as store_count
+
+    _p("")
+    _p(f"  {'subset':8s} {'usable':>8s} {'on disk':>9s} {'archive':>10s}")
+    _p("  " + "-" * 40)
+    for sub in SUBSET_ORDER:
+        try:
+            rows = load_fma_metadata(subset=sub)
+        except FileNotFoundError:
+            _p(f"  {sub:8s} (metadata not fetched — run `vt fetch --metadata-only`)")
+            break
+        have = sum(1 for r in rows if fma_audio_path(r["track_id"]).exists())
+        gb = FMA_ARCHIVES[sub][1] / 1e9
+        _p(f"  {sub:8s} {len(rows):8,d} {have:9,d} {gb:9.1f}G")
+    _p("")
+    try:
+        _p(f"  ingested   {store_count():,} points in '{COLLECTION}'")
+    except Exception as exc:  # noqa: BLE001 - qdrant may simply not be up
+        _p(f"  ingested   (qdrant unavailable: {str(exc)[:50]})")
+    _p("")
+    _p("  'usable' counts only CC0 / CC-BY tracks — the licence filter is the ceiling,")
+    _p("  not the download. Expand with:  vt fetch --subset large && vt ingest --subset large")
+    _p("")
+    return 0
+
+
 def cmd_upload(args):
     """Embed a local audio file into the collection, same as dropping it on the UI."""
     from pathlib import Path as _Path
@@ -407,7 +443,16 @@ def main(argv=None) -> int:
 
     f = sub.add_parser("fetch", help="download corpus + metadata")
     f.add_argument("--metadata-only", action="store_true")
+    f.add_argument("--subset", default="small", choices=["small", "medium", "large"],
+                   help="how much of FMA to fetch (cumulative; default small)")
+    f.add_argument("--full-archive", action="store_true",
+                   help="download the whole zip instead of pulling only usable tracks")
+    f.add_argument("--workers", type=int, default=8)
+    f.add_argument("--limit", type=int, help="fetch at most N new tracks (selective only)")
     f.set_defaults(func=cmd_fetch)
+
+    c = sub.add_parser("corpus", help="what corpus is available, ingested and on disk")
+    c.set_defaults(func=cmd_corpus)
 
     i = sub.add_parser("ingest", help="segment, embed, upsert, write attributions")
     i.add_argument("--limit", type=int)

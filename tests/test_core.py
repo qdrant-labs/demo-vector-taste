@@ -677,3 +677,72 @@ def test_uploads_are_excluded_from_the_scoring_population_but_not_from_search():
     # Retrieval deliberately filters only generated points.
     assert "is_upload" not in inspect.getsource(search.merge_filters)
     assert "is_upload" not in inspect.getsource(search._query)
+
+
+# ---------------------------------------------------------------------- corpus expansion
+def test_subset_selection_is_cumulative():
+    """FMA's `set.subset` is an ORDERED category and a track carries the SMALLEST subset it
+    belongs to, so "the large subset" means small + medium + large. Matching one value
+    exactly returned 6,435 large-only tracks instead of all 8,780 usable ones."""
+    from vector_taste.corpus import SUBSET_ORDER
+
+    assert SUBSET_ORDER == ["small", "medium", "large"]
+
+    def wanted(subset):
+        return set(SUBSET_ORDER[: SUBSET_ORDER.index(subset) + 1])
+
+    assert wanted("small") == {"small"}
+    assert wanted("medium") == {"small", "medium"}
+    assert wanted("large") == {"small", "medium", "large"}
+
+
+def test_unknown_subset_is_rejected_rather_than_silently_empty():
+    import pytest
+
+    from vector_taste.corpus import load_fma_metadata
+
+    with pytest.raises(ValueError, match="unknown subset"):
+        load_fma_metadata(subset="enormous")
+
+
+def test_range_file_seek_semantics():
+    """zipfile drives this with absolute, relative and from-the-end seeks, so all three have
+    to behave -- and clamp, because a zip reader will happily seek past either end."""
+    from unittest.mock import MagicMock
+
+    from vector_taste.fetch import HttpRangeFile
+
+    client = MagicMock()
+    client.head.return_value.headers = {"accept-ranges": "bytes", "content-length": "1000"}
+    f = HttpRangeFile("http://example/x.zip", client)
+
+    assert f.seekable() and f.size == 1000
+    assert f.seek(100) == 100
+    assert f.seek(50, 1) == 150          # relative
+    assert f.seek(-20, 2) == 980         # from the end, how a zip finds its EOCD
+    assert f.seek(-5000, 0) == 0         # clamped, never negative
+    assert f.seek(5000, 0) == 1000       # clamped to size
+    assert f.read(10) == b""             # nothing left, and no request made
+
+
+def test_range_file_refuses_a_host_that_cannot_do_ranges():
+    """Without ranges the whole technique silently degrades to downloading 100GB."""
+    from unittest.mock import MagicMock
+
+    import pytest
+
+    from vector_taste.fetch import HttpRangeFile
+
+    client = MagicMock()
+    client.head.return_value.headers = {"content-length": "1000"}
+    with pytest.raises(RuntimeError, match="byte ranges"):
+        HttpRangeFile("http://example/x.zip", client)
+
+
+def test_every_archive_has_a_url_and_a_size():
+    from vector_taste.corpus import FMA_ARCHIVES, SUBSET_ORDER
+
+    assert set(FMA_ARCHIVES) == set(SUBSET_ORDER)
+    for name, (url, size) in FMA_ARCHIVES.items():
+        assert url.startswith("https://") and url.endswith(f"fma_{name}.zip")
+        assert size > 1e9

@@ -85,12 +85,52 @@ uv run vt prompt --profile <hash>     # retrieved payload -> ACE-Step params
 uv run vt generate --profile <hash>   # compose
 uv run vt loop --profile <hash>       # re-embed and score against your taste
 
+uv run vt corpus                      # what corpus is available, ingested, on disk
 uv run vt upload my-track.mp3         # embed your own audio, print its neighbors
 uv run vt reset --uploads             # drop every upload
 
 uv run vt timings                     # wall-clock per stage
 uv run vt preflight                   # pre-demo checklist
 ```
+
+---
+
+## Making the corpus bigger
+
+The corpus is **1,005 tracks because that is every permissively-licensed track in
+`fma_small`** — 1,005 of its 8,000 pass the CC0/CC-BY filter. The licence filter is the
+ceiling, not an ingest limit. `vt corpus` prints where you stand without touching the network.
+
+FMA's archives are nested, all 30-second clips:
+
+| subset | tracks | usable (CC0/CC-BY) | whole archive | **selective fetch** |
+|---|---|---|---|---|
+| `small` | 8,000 | 1,005 | 7.7 GB | — |
+| `medium` | 25,000 | 2,345 | 23.8 GB | ~2.3 GB |
+| `large` | 106,574 | **8,780** | 100.3 GB | **~8.8 GB** |
+
+```bash
+uv run vt fetch --subset large        # ~7 GB, not 100 GB
+uv run vt ingest --subset large
+```
+
+Measured on an M4 MacBook Air doing exactly that: **7,205 tracks fetched in 7.19 GB with zero
+failures at 11.7 tracks/s**, then ingested at ~4 tracks/s into **25,791 points across 8,828
+segments by 1,594 artists**. Search stays fast — an exact scan of the whole collection is
+59 ms.
+
+**`vt fetch` pulls only the tracks you can actually use.** Downloading `fma_large.zip` to keep
+8,780 of its 106,574 files would discard 92% of a 100 GB transfer — and would not fit on a
+laptop. Instead the ZIP's central directory is read over HTTP Range (4 requests, 8.7 MB), and
+each wanted member is fetched with a single ranged request and checked against the CRC in that
+directory. Verified byte-for-byte against tracks we already had from `fma_small`. Pass
+`--full-archive` for the old download-and-extract path, and `--limit N` to take a slice.
+
+Ingest is additive and point IDs are deterministic, so expanding is idempotent and **saved
+taste profiles keep working**. Two things do change: the closing percentile is computed
+against a bigger population, so that number moves; and retrieval returns new neighbours, so
+generation prompts differ from the ones the bank was baked with. **Re-run `vt bake` before a
+talk** if you expand.
 
 ---
 

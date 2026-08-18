@@ -7,9 +7,10 @@ Everything goes through `query_points_groups(group_by="segment_id")`. Two reason
    database. Mean-pooling a segment's chunks would bury the hook: a segment whose chorus
    scores 0.8 and whose intro scores 0.0 reports ~0.46 pooled, but 0.8 under max-sim.
 
-`exact=True` is passed everywhere. At this corpus size Qdrant builds no HNSW graph anyway
-(threshold is ~5000 vectors per segment), so this costs nothing and states the intent — and
-it keeps results identical if the corpus later grows past that threshold.
+`exact=True` is passed everywhere. Past Qdrant's indexing threshold an HNSW graph does get
+built, and an approximate search would then be free to return slightly different neighbours
+between runs; `exact=True` forces the full scan regardless, which is what keeps a rehearsed
+demo reproducible. On the expanded corpus (~26k points) that scan is still sub-10ms.
 """
 
 from __future__ import annotations

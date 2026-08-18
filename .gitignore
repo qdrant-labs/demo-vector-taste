@@ -24,6 +24,10 @@ timings.jsonl
 # by a script under its own licence.
 !bank/*.wav
 
+# Written by ingest for ad-hoc analysis and read by nothing. 5.9MB at 1,005 tracks, ~53MB at
+# 8,780 -- past GitHub's warning threshold, and a fresh blob on every re-ingest.
+data/embeddings.npy
+
 # python
 __pycache__/
 *.py[cod]
