@@ -206,6 +206,14 @@ def taste(req: TasteReq):
     if profile.is_empty():
         return {"hits": [], "diff": None, "profile": None}
 
+    # A negative with nothing to anchor it is not "less like this", it is "maximally unlike
+    # this" -- the query goes to the far side of the space. Measured: zero of the twelve
+    # results you were looking at survive, and the top scores are NEGATIVE (-0.48). It reads
+    # as the app throwing your search away, so refuse it rather than serve the antipode.
+    if req.negatives and not req.positives:
+        raise HTTPException(400, "mark something you like first — a negative on its own "
+                                 "jumps to unrelated music")
+
     after = recommend(profile, limit=req.limit)
     payload = {
         "hits": [_hit_json(h) for h in after],

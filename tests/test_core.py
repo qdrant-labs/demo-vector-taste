@@ -774,3 +774,33 @@ def test_an_empty_profile_is_still_refused_by_recommend():
 
     with pytest.raises(ValueError, match="no examples"):
         recommend(TasteProfile([], [], ""))
+
+
+def test_a_negative_needs_a_positive_to_push_against():
+    """Unanchored, a negative is not "less like this" -- it is "maximally unlike this", and
+    the query lands on the far side of the space. Measured on the live corpus: zero of the
+    twelve results you were looking at survive, and the top scores are NEGATIVE (-0.48).
+    Anchored by one positive, 2-4 of the twelve survive.
+
+    So the API refuses it and the UI disables the button until something is marked +.
+    """
+    import inspect
+
+    from vector_taste.ui import app as ui
+
+    src = inspect.getsource(ui.taste)
+    assert "if req.negatives and not req.positives:" in src
+    assert "mark something you like first" in src
+
+
+def test_the_ui_gates_the_negative_button_and_unstrands_it():
+    """Both routes into the unanchored state have to be covered: marking - first, and
+    removing the last + while - marks remain."""
+    js = (
+        __import__("pathlib").Path("vector_taste/ui/static/app.js").read_text()
+    )
+    assert "const canMarkNegative = () => state.pos.size > 0;" in js
+    assert 'kind === "neg" && !canMarkNegative()' in js
+    assert "function dropStrandedNegatives()" in js
+    # called from BOTH the row-mark path and the chip-removal path
+    assert js.count("dropStrandedNegatives();") >= 2

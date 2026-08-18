@@ -374,8 +374,11 @@ function rowHtml(h, i, dropped) {
     </div>
     <div class="score">${dropped ? "" : h.score.toFixed(4)}</div>
     <div class="mark">
-      <button class="mk ${isPos ? "on-pos" : ""}" data-mark="pos" aria-label="More like this">+</button>
-      <button class="mk ${isNeg ? "on-neg" : ""}" data-mark="neg" aria-label="Less like this">−</button>
+      <button class="mk ${isPos ? "on-pos" : ""}" data-mark="pos" aria-label="More like this"
+              title="More like this">+</button>
+      <button class="mk ${isNeg ? "on-neg" : ""}" data-mark="neg" aria-label="Less like this"
+              ${canMarkNegative() ? "" : "disabled"}
+              title="${canMarkNegative() ? "Less like this" : NEG_NEEDS_ANCHOR}">−</button>
     </div>
   </div>`;
 }
@@ -778,6 +781,17 @@ function showGenerated(g, loop) {
 /* Remove any entry for this hit's SEGMENT, whichever chunk it was stored under.
    Returns true if something was removed, so the caller can treat a second click as a
    toggle-off rather than stacking a near-duplicate vector onto the taste profile. */
+/* Dropping the last positive leaves any negatives unanchored, which is the same broken
+   state reached from the other direction. Clear them together. */
+function dropStrandedNegatives() {
+  if (state.pos.size === 0 && state.neg.size) {
+    state.neg.clear();
+    toast("cleared the − marks: they need a + to push against", 3500);
+    return true;
+  }
+  return false;
+}
+
 function unmarkSegment(map, hit) {
   let removed = false;
   for (const [id, h] of [...map]) {
@@ -789,15 +803,23 @@ function unmarkSegment(map, hit) {
   return removed;
 }
 
+/* A negative needs a positive to push against. On its own the recommend query heads for the
+   far side of the space -- measured: none of the twelve results you were looking at survive,
+   and the scores go negative. So "-" stays disabled until something is marked "+". */
+const NEG_NEEDS_ANCHOR = "Mark a + first — a − on its own jumps to unrelated music";
+const canMarkNegative = () => state.pos.size > 0;
+
 function mark(pointId, kind) {
   const hit = state.hits.find((h) => h.point_id === pointId)
     || [...state.pos.values(), ...state.neg.values()].find((h) => h.point_id === pointId);
   if (!hit) return;
+  if (kind === "neg" && !canMarkNegative()) { toast(NEG_NEEDS_ANCHOR, 4000); return; }
   const [add, other] = kind === "pos" ? [state.pos, state.neg] : [state.neg, state.pos];
   unmarkSegment(other, hit);                   // a result is either + or −, never both
   if (!unmarkSegment(add, hit)) add.set(pointId, hit);
+  dropStrandedNegatives();                     // un-marking the last + strands the − marks
   render();
-  refreshTaste();
+  if (state.pos.size || state.neg.size) refreshTaste(); else doSearch();
 }
 
 $("#results").addEventListener("click", (e) => {
@@ -821,8 +843,9 @@ $("#chips").addEventListener("click", (e) => {
   const hit = state.pos.get(b.dataset.unchip) || state.neg.get(b.dataset.unchip);
   if (hit) { unmarkSegment(state.pos, hit); unmarkSegment(state.neg, hit); }
   else { state.pos.delete(b.dataset.unchip); state.neg.delete(b.dataset.unchip); }
+  dropStrandedNegatives();
   render();
-  if (state.pos.size || state.neg.size) refreshTaste(); else doSearch();
+  if (state.pos.size) refreshTaste(); else doSearch();
 });
 
 /* ------------------------------------------------------------------------------ theme */
