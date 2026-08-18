@@ -8,17 +8,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from ..config import BANK, GEN_BACKEND, GENERATED, ROOT, is_cloud
+from ..config import GEN_BACKEND, GENERATED, ROOT, is_cloud
 from ..search import Hit, by_text, format_table  # noqa: F401
 
 STATIC = Path(__file__).parent / "static"
 
 app = FastAPI(title="Vector Taste", docs_url=None, redoc_url=None)
+
+# Module-level so it is not a call in a default argument (ruff B008).
+_UPLOAD_FILE = File(...)
 
 
 def _hit_json(h: Hit) -> dict:
@@ -33,6 +36,8 @@ def _hit_json(h: Hit) -> dict:
         "key": p.get("key"),
         "tags": p.get("tags") or [],
         "license": p.get("license", ""),
+        # Drives the YOURS badge. Uploads are ordinary library members otherwise.
+        "is_upload": bool(p.get("is_upload")),
         "start_sec": h.start_sec,
         "audio_url": f"/audio/{h.segment_id}",
     }
@@ -51,13 +56,66 @@ class TasteReq(BaseModel):
     # Speed/quality trade for live generation. 15s roughly halves the wait.
     duration: float = 30.0
     steps: int = 8
+    # Which generator to use for THIS compose. None -> the GEN_BACKEND default, so the
+    # toggle can change generator without restarting the server.
+    backend: str | None = None
+    # Sing rather than play. Only some backends can; the route rejects the rest outright.
+    vocals: bool = False
     # Pin the seed to re-hear an exact take instead of composing a new one.
     reproducible: bool = False
 
 
+def build_id() -> str:
+    """Fingerprint of the front-end files, recomputed per request.
+
+    Used to cache-bust the asset URLs and to let a loaded page notice it has gone stale.
+    Cheap: three stat() calls, no reads.
+    """
+    import hashlib
+
+    stamp = "".join(
+        f"{f}:{(STATIC / f).stat().st_mtime_ns}"
+        for f in ("index.html", "app.js", "app.css")
+        if (STATIC / f).exists()
+    )
+    return hashlib.sha256(stamp.encode()).hexdigest()[:12]
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return (STATIC / "index.html").read_text()
+    # no-store on the shell, and see _no_cache_static below for the assets.
+    #
+    # This response had no Cache-Control, no ETag and no Last-Modified, which lets a browser
+    # apply HEURISTIC caching: it may reuse the page -- and the app.js referenced from it --
+    # without revalidating. On a demo that is edited while a tab stays open all day, that
+    # shows up as a fix that "did not work", because the tab is still running yesterday's
+    # JavaScript. Correctness of what you see beats a few bytes of local traffic.
+    #
+    # The asset URLs are stamped with build_id() as well. no-store fixes tabs opened from
+    # now on, but a cache entry poisoned BEFORE it shipped has no validators, so a browser
+    # may keep reusing it and its old app.js through ordinary reloads. A changing query
+    # string is a URL the cache has simply never seen, which is the only thing that
+    # reliably breaks that cycle.
+    html = (STATIC / "index.html").read_text()
+    v = build_id()
+    html = html.replace("/static/app.js", f"/static/app.js?v={v}")
+    html = html.replace("/static/app.css", f"/static/app.css?v={v}")
+    html = html.replace("<body>", f'<body data-build="{v}">', 1)
+    return HTMLResponse(html, headers={"Cache-Control": "no-store, must-revalidate"})
+
+
+@app.middleware("http")
+async def _no_cache_static(request, call_next):
+    """Force revalidation of /static so an edit is never invisible.
+
+    StaticFiles already sends an ETag, so this costs one conditional request per asset and
+    the answer is usually a 304 with no body. `no-cache` means "revalidate", not "do not
+    cache" -- the bytes are still reused when they have not changed.
+    """
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @app.on_event("startup")
@@ -68,10 +126,23 @@ def _startup() -> None:
     it, so paying that during startup turns the first compose from ~250s (150 of them
     featureless) into ~99s with a real moving ring.
 
-    Skipped for GEN_BACKEND=bank: the stage config never generates, so holding ~4GB would
-    be pure cost. Never blocks -- search must work while this runs.
+    Also clears any audio left over from a previous session, so every run starts on the
+    fixed corpus rather than on whatever the last person dropped in.
+
+    Only for the backends that actually use it. ACE-Step's footprint is ~19GB, so warming it
+    when the default generator is hosted would be pure cost. Never blocks -- search must work
+    while this runs.
     """
-    if GEN_BACKEND == "bank":
+    from ..uploads import purge
+
+    try:
+        purge()
+    except Exception as exc:  # noqa: BLE001 - a purge failure must not stop the server
+        import logging
+
+        logging.getLogger("vector_taste.ui").warning("upload purge failed: %s", exc)
+
+    if GEN_BACKEND not in ("local", "modal"):
         return
     from ..worker import prewarm
 
@@ -87,22 +158,83 @@ def status():
         info = collection_info()
     except Exception as exc:
         raise HTTPException(503, f"Qdrant unavailable: {exc}") from exc
+    from ..generate import VOCALS_BACKENDS, available_backends
+
     return {
         "points": info["points"],
         "target": "cloud" if is_cloud() else "local",
         "backend": GEN_BACKEND,
         "worker": worker_state(),
+        "backends": available_backends(),
+        # So the UI can disable the vocals toggle rather than fail on Compose.
+        "vocals_backends": sorted(VOCALS_BACKENDS),
+        # The page compares this to its own stamp and says so if they differ.
+        "build": build_id(),
     }
+
+
+@app.post("/api/abort")
+def abort():
+    """Stop the in-flight generation.
+
+    Dispatches through the abort registry rather than the ACE-Step worker, so it works on
+    whichever backend is actually running: ACE-Step kills its process, ElevenLabs closes its
+    HTTP client. Wiring this to the worker directly would make Stop silently do nothing on
+    a hosted backend.
+    """
+    from ..progress import abort_current
+
+    return {"aborted": abort_current()}
 
 
 @app.get("/api/progress")
 def progress():
     """Latest generation progress. Polled by the UI while a compose is in flight."""
-    from ..worker import PROGRESS, worker_state
+    from ..progress import PROGRESS
+    from ..worker import worker_state
 
     snap = PROGRESS.snapshot()
     snap["worker"] = worker_state()
     return snap
+
+
+@app.post("/api/upload")
+async def upload(file: UploadFile = _UPLOAD_FILE):
+    """Embed a user's audio into the same collection the corpus lives in.
+
+    Synchronous: a few seconds of CLAP, and the answer is worth waiting for. The file's own
+    name never reaches the filesystem -- see uploads.save().
+    """
+    from ..uploads import UploadError, ingest, save
+
+    data = await file.read()
+    try:
+        path, track_id = save(data, file.filename or "")
+    except UploadError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    try:
+        return ingest(path, track_id, Path(file.filename or "upload").name)
+    except UploadError as exc:
+        path.unlink(missing_ok=True)          # never leave audio we could not embed
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        path.unlink(missing_ok=True)
+        raise HTTPException(500, f"could not embed that file: {exc}") from exc
+
+
+@app.get("/api/uploads")
+def uploads_list():
+    from ..uploads import listing
+
+    return {"uploads": listing()}
+
+
+@app.delete("/api/uploads/{track_id}")
+def uploads_delete(track_id: str):
+    from ..uploads import delete
+
+    return {"deleted": delete(track_id)}
 
 
 @app.post("/api/search")
@@ -125,6 +257,14 @@ def taste(req: TasteReq):
     if profile.is_empty():
         return {"hits": [], "diff": None, "profile": None}
 
+    # A negative with nothing to anchor it is not "less like this", it is "maximally unlike
+    # this" -- the query goes to the far side of the space. Measured: zero of the twelve
+    # results you were looking at survive, and the top scores are NEGATIVE (-0.48). It reads
+    # as the app throwing your search away, so refuse it rather than serve the antipode.
+    if req.negatives and not req.positives:
+        raise HTTPException(400, "mark something you like first — a negative on its own "
+                                 "jumps to unrelated music")
+
     after = recommend(profile, limit=req.limit)
     payload = {
         "hits": [_hit_json(h) for h in after],
@@ -132,7 +272,11 @@ def taste(req: TasteReq):
         "diff": None,
     }
 
-    if req.negatives:
+    # Needs positives AND negatives. The baseline is the positives-only ranking, and with no
+    # positives that profile is empty -- which recommend() rightly refuses, so marking "-"
+    # before ever marking "+" used to 500. A negatives-only query still works and is still
+    # useful; there is simply nothing to diff it against yet.
+    if req.negatives and req.positives:
         before = recommend(TasteProfile(req.positives, [], req.steer), limit=req.limit)
         d = diff(before, after)
         payload["diff"] = {
@@ -143,20 +287,29 @@ def taste(req: TasteReq):
         }
     # Deliberately NOT saved here. Every +/- gesture hits this route, and persisting each
     # one litters data/ with profiles that `vt bake` would then try to bake. Profiles are
-    # saved on compose, where the prompt cache and bank actually need them.
+    # saved on compose, where the prompt cache actually needs them.
     return payload
 
 
 @app.post("/api/generate")
 def generate_route(req: TasteReq):
-    from ..generate import generate
+    from ..generate import VOCALS_BACKENDS, generate
     from ..prompt import fresh_seed, seed_from_hash, synthesize
     from ..prompt import save as save_prompt
-    from ..taste import TasteProfile, negative_hits, recommend, taste_centroid
+    from ..taste import TasteProfile, negative_hits, recommend
 
     profile = TasteProfile(req.positives, req.negatives, req.steer)
     if profile.is_empty():
         raise HTTPException(400, "mark at least one positive first")
+
+    backend = req.backend or GEN_BACKEND
+    if req.vocals and backend not in VOCALS_BACKENDS:
+        # Reject rather than quietly hand back an instrumental: the user asked for a voice
+        # and would have no way to tell the request was dropped.
+        raise HTTPException(
+            400, f"the {backend} generator cannot sing — switch to "
+                 f"{' or '.join(sorted(VOCALS_BACKENDS))}"
+        )
 
     hits = recommend(profile, limit=10)
     synth = synthesize(
@@ -167,21 +320,37 @@ def generate_route(req: TasteReq):
         negatives=negative_hits(profile),
         seed=seed_from_hash(profile.hash) if req.reproducible else fresh_seed(),
         steps=req.steps,
+        vocals=req.vocals,
     )
     save_prompt(profile.hash, synth)
     profile.save()
 
-    # Pass the centroid so an unrehearsed taste falls back to the NEAREST banked track
-    # rather than silence. Every live gesture produces a new hash.
-    centroid = taste_centroid(profile) if profile.positives else None
-    res = generate(synth.params, profile.hash, centroid=centroid)
+    from ..generate import GenerationAborted, GenerationError
+
+    # Negative descriptors reach the model directly on backends with a negative prompt
+    # (ElevenLabs `negative_styles`); elsewhere they are ignored.
+    neg_desc = [
+        d for h in negative_hits(profile) for d in (h.payload.get("descriptors") or [])
+    ]
+    try:
+        res = generate(
+            synth.params, profile.hash,
+            backend=backend, negatives=neg_desc or None, vocals=req.vocals,
+        )
+    except GenerationAborted:
+        # 499 (client closed request) rather than 500: nothing failed, the user stopped it.
+        raise HTTPException(499, "generation aborted") from None
+    except GenerationError as exc:
+        # 502: the generator failed, and there is deliberately nothing to serve instead.
+        # The UI shows this text, so it has to say what actually broke.
+        raise HTTPException(502, str(exc)) from None
     return {
         "profile": profile.hash,
         "prompt": synth.params.prompt,
         "bpm": synth.params.bpm,
         "keyscale": synth.params.keyscale,
         "backend": res.backend,
-        "from_bank": res.from_bank,
+        "vocals": req.vocals,
         # Surfaced so a fallback is visible to the presenter without a stack trace on screen
         "note": res.note,
         "audio_url": f"/generated/{res.path.name}",
@@ -193,13 +362,13 @@ def generate_route(req: TasteReq):
 def loop_route(req: TasteReq):
     from ..generate import audio_for_profile
     from ..loop import close_loop
-    from ..taste import TasteProfile, taste_centroid
+    from ..taste import TasteProfile
 
     profile = TasteProfile(req.positives, req.negatives, req.steer)
     if not profile.positives:
         raise HTTPException(400, "mark at least one positive first")
     # Score the audio the user actually heard, including a nearest-match fallback.
-    audio, _ = audio_for_profile(profile.hash, taste_centroid(profile))
+    audio, _ = audio_for_profile(profile.hash)
     if not audio:
         raise HTTPException(404, "generate a track first")
     r = close_loop(audio, profile, upsert=True)
@@ -210,6 +379,9 @@ def loop_route(req: TasteReq):
         "baseline_cosine": round(r.baseline_cosine, 4),
         "baseline_percentile": round(r.baseline_percentile, 1),
         "beats_baseline": r.beats_baseline,
+        # WHICH human track that baseline is, so the UI can play the comparison rather
+        # than only print its cosine.
+        "baseline": _hit_json(r.baseline_hit) if r.baseline_hit else None,
     }
 
 
@@ -247,11 +419,13 @@ def audio(segment_id: str):
 
 @app.get("/generated/{name}")
 def generated(name: str):
-    """Serve a generated take, or a banked one. Both dirs, never outside them."""
-    for root in (GENERATED, BANK):
+    """Serve a generated take. Never outside GENERATED."""
+    for root in (GENERATED,):
         path = (root / name).resolve()
         if path.is_file() and root.resolve() in path.parents:
-            return FileResponse(path, media_type="audio/wav")
+            # ElevenLabs returns mp3, ACE-Step wav -- serve each as what it actually is.
+            media = "audio/mpeg" if path.suffix == ".mp3" else "audio/wav"
+            return FileResponse(path, media_type=media)
     raise HTTPException(404, "not found")
 
 

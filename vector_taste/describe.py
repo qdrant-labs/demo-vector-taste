@@ -76,7 +76,7 @@ def vocab_matrix() -> np.ndarray:
 
 
 def score_matrix(audio: np.ndarray, vocab: np.ndarray) -> np.ndarray:
-    """Corpus-relative descriptor scores: (n_segments, n_terms), mean-centred per term."""
+    """Corpus-relative descriptor scores: (n_segments, n_terms), mean-centered per term."""
     raw = audio @ vocab.T
     return raw - raw.mean(axis=0, keepdims=True)
 

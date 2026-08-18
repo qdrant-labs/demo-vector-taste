@@ -1,10 +1,10 @@
 {
   "params": {
-    "prompt": "dreamy lo-fi hip hop with vinyl crackle and mellow keys, in the style of hypnotic and trance-like hip hop electronic, hand percussion, lo-fi and tape-saturated, syncopated and groovy, around 108 BPM, instrumental, no vocals",
+    "prompt": "dreamy lo-fi hip hop with vinyl crackle and mellow keys, in the style of hip hop electronic, around 123 BPM, instrumental, no vocals",
     "lyrics": "",
     "audio_duration": 30.0,
-    "bpm": 108,
-    "keyscale": "G major",
+    "bpm": 123,
+    "keyscale": "D major",
     "timesignature": "4",
     "num_inference_steps": 8,
     "shift": 3.0,
@@ -20,24 +20,17 @@
       "electronic"
     ],
     "descriptors": {
-      "mood": [
-        "hypnotic and trance-like"
-      ],
-      "instrument": [
-        "hand percussion"
-      ],
-      "production": [
-        "lo-fi and tape-saturated"
-      ],
-      "texture": [
-        "syncopated and groovy"
-      ]
+      "mood": [],
+      "instrument": [],
+      "production": [],
+      "texture": []
     },
     "steer": "dreamy lo-fi hip hop with vinyl crackle and mellow keys",
+    "vocals": false,
     "top_neighbors": [
       "Black Ant \u2014 Underdog",
       "Black Ant \u2014 D8M3",
-      "Uncle Milk \u2014 Ruggles (ft epsilon not)"
+      "Little Glass Men \u2014 Play Pelagic"
     ]
   }
 }

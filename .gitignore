@@ -17,12 +17,10 @@ timings.jsonl
 *.flac
 !tests/fixtures/*.wav
 
-# The pre-baked generation bank IS committed (~5.5MB per track). It is our own model
-# output, it makes `git clone && uv sync && vt ui` a working demo with real audio, and it
-# is the stage path — a demo that depends on downloading a release bundle is a demo that
-# depends on the network. Corpus audio stays out: that is other people's music, fetched
-# by a script under its own licence.
-!bank/*.wav
+
+# Written by ingest for ad-hoc analysis and read by nothing. 5.9MB at 1,005 tracks, ~53MB at
+# 8,780 -- past GitHub's warning threshold, and a fresh blob on every re-ingest.
+data/embeddings.npy
 
 # python
 __pycache__/
@@ -39,12 +37,15 @@ venv/
 .vscode/
 .acestep
 
-# Live generations: one file per take, regenerated on demand. The curated bank/ is
-# committed; these are not.
+# Live generations: one file per take, regenerated on demand. Never committed.
 generated/
 
+# User-supplied audio of unknown licence. *.mp3/*.wav/*.flac are already ignored above;
+# this is belt-and-braces on someone else's music. Purged on every server start anyway.
+uploads/
+
 # Taste profiles are written on every compose while exploring, so ignore them by
-# default and track ONLY the scripted demo set that `vt bake` and bank/ depend on.
+# default and track ONLY the scripted demo set that `vt rehearse` depends on.
 data/taste_*.json
 data/prompt_*.json
 !data/taste_lofi.json

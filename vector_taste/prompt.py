@@ -2,7 +2,7 @@
 
 Deterministic template, no LLM. That is the design, not a limitation: the offline path is
 the DEFAULT rather than a cached fallback, the same taste always yields the same prompt (so
-a pre-baked bank entry is guaranteed to match), and there is no API key or network call
+the same taste always describes the same music), and there is no API key or network call
 anywhere near the demo's critical path.
 
 What changed, and why
@@ -65,7 +65,7 @@ def seed_from_hash(profile_hash: str) -> int:
     Used where reproducibility is the point: `vt bake` (the same profile must re-bake to the
     same track) and `vt rehearse` (which asserts the finale number does not drift).
 
-    Every bank entry previously used seed=42, so identical noise plus near-identical prompts
+    Every generation previously used seed=42, so identical noise plus near-identical prompts
     produced near-identical audio.
     """
     return int(profile_hash[:8], 16) % SEED_MAX
@@ -184,8 +184,9 @@ def synthesize(
     negatives: list[Hit] | None = None,
     seed: int | None = None,
     steps: int = 8,
+    vocals: bool = False,
 ) -> Synthesis:
-    """Build ACE-Step parameters from the retrieved neighbourhood plus a user steer.
+    """Build ACE-Step parameters from the retrieved neighborhood plus a user steer.
 
     The user's steer leads: they are steering, and burying their words behind aggregated
     corpus descriptors would invert the co-creation claim this demo makes.
@@ -217,12 +218,13 @@ def synthesize(
         parts.append(f"around {bpm} BPM")
 
     if not parts:
-        parts = ["instrumental music"]
+        parts = ["vocal music" if vocals else "instrumental music"]
 
     # "instrumental, no vocals" only once — the old template appended it while `instrumental`
-    # was also a corpus tag, so some prompts said it twice.
+    # was also a corpus tag, so some prompts said it twice. Skipped entirely when the user
+    # asked for vocals, or the prompt would contradict the request.
     prompt = ", ".join(p for p in parts if p)
-    if "no vocals" not in prompt:
+    if not vocals and "no vocals" not in prompt:
         prompt += ", instrumental, no vocals"
 
     params = GenerationParams(
@@ -242,6 +244,7 @@ def synthesize(
             "tags": tags,
             "descriptors": desc,
             "steer": steer,
+            "vocals": vocals,
             "top_neighbors": [h.label for h in hits[:3]],
         },
     )
@@ -252,7 +255,7 @@ def cache_path(profile_hash: str):
 
 
 def save(profile_hash: str, synth: Synthesis):
-    """Cache to disk so the bank and the live path provably use identical parameters."""
+    """Cache to disk so a re-run can prove it used identical parameters."""
     DATA.mkdir(parents=True, exist_ok=True)
     p = cache_path(profile_hash)
     p.write_text(

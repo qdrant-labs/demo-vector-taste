@@ -1,10 +1,10 @@
 {
   "params": {
-    "prompt": "warm acoustic guitar, intimate and sparse, in the style of sombre and solemn folk instrumental, grand piano, dry and close-miked, dense and layered, around 112 BPM, instrumental, no vocals",
+    "prompt": "warm acoustic guitar, intimate and sparse, in the style of folk instrumental, around 129 BPM, instrumental, no vocals",
     "lyrics": "",
     "audio_duration": 30.0,
-    "bpm": 112,
-    "keyscale": "G major",
+    "bpm": 129,
+    "keyscale": "A major",
     "timesignature": "4",
     "num_inference_steps": 8,
     "shift": 3.0,
@@ -20,24 +20,17 @@
       "instrumental"
     ],
     "descriptors": {
-      "mood": [
-        "sombre and solemn"
-      ],
-      "instrument": [
-        "grand piano"
-      ],
-      "production": [
-        "dry and close-miked"
-      ],
-      "texture": [
-        "dense and layered"
-      ]
+      "mood": [],
+      "instrument": [],
+      "production": [],
+      "texture": []
     },
     "steer": "warm acoustic guitar, intimate and sparse",
+    "vocals": false,
     "top_neighbors": [
+      "Josh Armistead \u2014 Peace With My Brothers",
       "David Mumford \u2014 Twinkle Twinkle (Instrumental)",
-      "Jelsonic \u2014 Time Is Picking Away",
-      "Scott Holmes \u2014 Wash Away"
+      "Doctor Turtle \u2014 Always The Teasmade, Never The Tease"
     ]
   }
 }

@@ -85,20 +85,103 @@ uv run vt prompt --profile <hash>     # retrieved payload -> ACE-Step params
 uv run vt generate --profile <hash>   # compose
 uv run vt loop --profile <hash>       # re-embed and score against your taste
 
+uv run vt corpus                      # what corpus is available, ingested, on disk
+uv run vt upload my-track.mp3         # embed your own audio, print its neighbors
+uv run vt reset --uploads             # drop every upload
+
 uv run vt timings                     # wall-clock per stage
 uv run vt preflight                   # pre-demo checklist
 ```
 
 ---
 
+## Making the corpus bigger
+
+The corpus is **1,005 tracks because that is every permissively-licensed track in
+`fma_small`** — 1,005 of its 8,000 pass the CC0/CC-BY filter. The licence filter is the
+ceiling, not an ingest limit. `vt corpus` prints where you stand without touching the network.
+
+FMA's archives are nested, all 30-second clips:
+
+| subset | tracks | usable (CC0/CC-BY) | whole archive | **selective fetch** |
+|---|---|---|---|---|
+| `small` | 8,000 | 1,005 | 7.7 GB | — |
+| `medium` | 25,000 | 2,345 | 23.8 GB | ~2.3 GB |
+| `large` | 106,574 | **8,780** | 100.3 GB | **~8.8 GB** |
+
+```bash
+uv run vt fetch --subset large        # ~7 GB, not 100 GB
+uv run vt ingest --subset large
+```
+
+Measured on an M4 MacBook Air doing exactly that: **7,205 tracks fetched in 7.19 GB with zero
+failures at 11.7 tracks/s**, then ingested at ~4 tracks/s into **25,791 points across 8,828
+segments by 1,594 artists**. Search stays fast — an exact scan of the whole collection is
+59 ms.
+
+After expanding, retrieval returns different neighbours, so compositions made before the
+expansion were generated from prompts the corpus no longer produces. Re-compose anything you
+plan to reuse.
+
+**`vt fetch` pulls only the tracks you can actually use.** Downloading `fma_large.zip` to keep
+8,780 of its 106,574 files would discard 92% of a 100 GB transfer — and would not fit on a
+laptop. Instead the ZIP's central directory is read over HTTP Range (4 requests, 8.7 MB), and
+each wanted member is fetched with a single ranged request and checked against the CRC in that
+directory. Verified byte-for-byte against tracks we already had from `fma_small`. Pass
+`--full-archive` for the old download-and-extract path, and `--limit N` to take a slice.
+
+Ingest is additive and point IDs are deterministic, so expanding is idempotent and **saved
+taste profiles keep working**. Two things do change: the closing percentile is computed
+against a bigger population, so that number moves; and retrieval returns new neighbours, so
+generation prompts differ from the ones earlier takes were made with.
+
+---
+
+## Bring your own music
+
+Drop an audio file anywhere on the page (or press **Upload**). It is chunked into the same
+10-second windows as the corpus, embedded with the same CLAP model, and upserted into the
+same Qdrant collection — then **Find similar** returns the tracks nearest to it.
+
+Because an upload is an ordinary point carrying `is_generated: false`, it needs no special
+handling in retrieval: it is searchable, markable with +/−, and usable as a recommendation
+example exactly like a corpus track. A 3½-minute file becomes ~7 segments / 21 chunk points
+and appears as one clip; **Find similar** queries with all of them at once, so the match is
+made on the strongest moment of the track rather than on its intro.
+
+`.mp3 .wav .flac .m4a .ogg`, up to 30 MB, truncated at 5 minutes.
+
+**Four things this deliberately does with somebody else's music:**
+
+- **Uploads are cleared on every server start**, so a run always begins on the fixed corpus.
+  `uploads/` is gitignored on top of the global `*.mp3`/`*.wav` rules.
+- **The licence label reads `your upload`, never a CC string.** The result row renders that
+  field, and printing `CC-BY` over a stranger's file would be a false claim in a repo whose
+  argument is that its corpus is legally clean. `ATTRIBUTIONS.md` cannot pick uploads up.
+- **Your audio is never sent to a hosted generator.** A hosted backend uploads its style
+  reference to a third party, so on those backends the reference skips past uploads to the
+  first corpus track. Local ACE-Step still conditions on your own clip — that never leaves
+  the machine.
+- **The closing percentile still counts the corpus, not your uploads.** Uploads are part of
+  the searchable library, but letting them into the scoring population would make the
+  headline number depend on whatever was dropped in and stop it being comparable run to run.
+
+The filename you upload is display text only — files are stored under a generated name, so a
+filename like `../../etc/passwd.mp3` is inert.
+
+---
+
 ## Generating music
 
-Generation has four backends, selected with `GEN_BACKEND`. **Search works without any of them.**
+Generation has five backends, selected with `GEN_BACKEND` — or picked live from the
+**Local · ElevenLabs** toggle beside **Compose**, which overrides the default for that
+one track. The toggle starts on whatever `GEN_BACKEND` says, so the stage config still wins by
+default. **Search works without any of them.**
 
-| `GEN_BACKEND` | Behaviour | Needs | Cost |
+| `GEN_BACKEND` | Behavior | Needs | Cost |
 |---|---|---|---|
 | `local` *(default)* | composes a **new track every time** | Apple Silicon (MLX) or an NVIDIA GPU, `./scripts/acestep_setup.sh` | free, ~2 min/track |
-| `bank` | replays pre-generated tracks, instantly | nothing | free |
+| `elevenlabs` | hosted, **seconds instead of minutes** | an [ElevenLabs](https://elevenlabs.io) key | ~$0.075 / 30s track |
 | `modal` | your own GPU deployment | a [Modal](https://modal.com) account | $30/mo free credits |
 | `replicate` | hosted | a [Replicate](https://replicate.com) token | ~$0.02/track |
 
@@ -107,13 +190,100 @@ same music — but the seed is random per run, so composing the same taste twice
 takes of that description. Both are kept, in `generated/`, named by seed. Pass `--seed N` (or
 `--reproducible`) to re-hear an exact take.
 
-**Use `GEN_BACKEND=bank` on stage.** A two-minute wait in front of an audience is not acceptable,
-so the bank replays tracks pre-generated by `vt bake`. It is instant and works offline, at the cost
-of the same taste always returning the same audio. Any backend falls back to the bank on failure —
-loud in the logs, quiet on screen.
+### Two display modes
 
-The hosted backends **cannot do audio style reference**; only `local` and `modal` can condition
-generation on a retrieved clip.
+The toggle in the header (or `M`) switches between **Desktop** and **Presentation**.
+
+Desktop is the default and is what you want while working: dense rows, BPM · key · licence
+on every result, the raw cosine, and the keyboard legend. Presentation is for the projector —
+type scales up, rows get taller, and the working chrome disappears so the back row reads
+titles rather than metadata. Everything that carries the argument stays in both: the
+percentile, both bars, the prompt, and the NEW/UP/DOWN tags.
+
+The choice is stored in `localStorage` and applied before first paint, so there is no reflow
+on load. **Rehearse in presentation mode** — it is not the default, and the density you
+practise in should be the density you present in.
+
+Actions are icons rather than words (search, upload, transport, theme, mode, stop, remove).
+Each keeps an `aria-label` and a hover tooltip, and the icons are an inline SVG sprite, so a
+page load still makes zero external requests. `+` / `−` stay as symbols: they match the
+on-screen copy and the keyboard shortcuts, and their shapes survive a washed-out projector.
+
+### Why `−` needs a `+` first
+
+The `−` button stays disabled until something is marked `+`. A negative on its own is not
+"less like this" — the recommend query heads for the far side of the space. Measured on the
+live corpus: **none of the twelve results you were looking at survive, and the top scores go
+negative (−0.48)**. Anchored by a single positive, 2–7 of the twelve survive and the list
+stays recognisably yours. `/api/taste` refuses the unanchored combination with a 400, and
+removing your last `+` clears the `−` marks rather than stranding them.
+
+**There is deliberately no fallback.** A backend that fails raises, and the UI shows why. An
+earlier design quietly served pre-baked audio instead, which made a broken generator
+indistinguishable from a working one — you found out after the demo rather than during it.
+The trade is real: a network failure mid-talk on `elevenlabs` is visible dead air, and the
+answer is the **Local** option in the toggle.
+
+`modal` and `replicate` **cannot do audio style reference**; `local`, `modal`, and `elevenlabs` can
+condition generation on a retrieved clip.
+
+### ElevenLabs Music
+
+The fast path — measured **3.7s** against ~120s locally, which is the difference between iterating
+on a taste and waiting on one. Set `ELEVENLABS_API_KEY` (see `.env.example`) and the toggle enables
+itself; without a key it stays disabled and explains why rather than failing on click.
+
+Two things it does *better* than local, and three caveats worth knowing before you rely on it:
+
+- **Negative examples reach the model.** Every other backend can only use a "less like this" mark to
+  reshape retrieval. Here the rejected clip's descriptors go in as `negative_styles`, so the
+  generator itself is told what to avoid. (Descriptors the rejected track *shares* with the accepted
+  ones are filtered out first — otherwise the request would ask for and forbid the same thing.)
+- **Style conditioning measurably works.** Same prompt, with and without the retrieved clip as a
+  reference: 0.8686 vs 0.7202 cosine to that clip.
+- **The seed is not reproducible.** Measured: the same seed produced different audio on consecutive
+  calls, matching ElevenLabs' own "exact reproducibility is not guaranteed". Different seeds do vary
+  the take. `vt rehearse` therefore stays on `local`, where the seed genuinely is
+  deterministic.
+- **Instrumental is a strong hint, not a flag.** The API's `force_instrumental` cannot be combined
+  with a composition plan, and a plan is required for both seed and conditioning — so instrumental is
+  requested through the chunk text and `negative_styles`. It holds on measured output, but it is not
+  a guarantee.
+- **It needs the network**, so it is not the stage config. `vt preflight` flags that.
+
+#### Vocals
+
+The **Instrumental · Vocals** toggle beside Compose (`V`) is ElevenLabs-only, and disables
+itself on the other generators rather than pretending. ACE-Step has no lyrics source, so
+vocals there would be wordless syllables; the API refuses the combination with a 400 instead
+of quietly handing back an instrumental.
+
+There is a wrinkle worth knowing. In plan mode a chunk's `text` **is** the lyric content, and
+this demo retrieves *sound* — there are no words to put there. So a vocal take makes an extra
+call to `POST /v1/music/plan`, which writes a plan from our prompt, and we keep only its
+lyrics: the styles, negatives, duration and audio conditioning are all still ours. Asking it
+for lyrics explicitly matters — handed the bare sound description it planned `[Intro]` /
+`[Groove]` with no words at all.
+
+Measured on real output, CLAP-scored against "a song with singing voice and vocals" versus
+"instrumental music, no vocals":
+
+| | vocals | instrumental | verdict |
+|---|---|---|---|
+| toggle off | +0.2133 | **+0.2822** | instrumental |
+| toggle on | **+0.2542** | +0.1144 | sings |
+
+The extra call costs ~5s (8.5s total vs 3.4s instrumental). **Its price is unmeasured**: the
+`character_count` on `/v1/user/subscription` does not move for music at all — not for the plan
+call and not for a generation we know was billed — so that meter cannot answer the question.
+It returns JSON rather than audio, and ElevenLabs bills music per minute of audio, but treat
+that as reasoning rather than a measurement. If the lyric call fails the track still
+generates, from a bare `[Verse]` marker.
+
+**Do not commit ElevenLabs output.** Their Music terms prohibit, on the self-serve tiers, creating
+"a library, catalog, database, or other repository of Output … making it available to third
+parties" — which a public repo of generated tracks plausibly is. `generated/` is gitignored, and the
+`generated/` is gitignored, and no generated audio is committed.
 
 ---
 

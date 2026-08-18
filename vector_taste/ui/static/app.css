@@ -3,8 +3,8 @@
  * Dark-first, per the brand. Two constraints shape the deviations from a normal web UI:
  *
  * 1. This gets projected. Type is larger than the brand's marketing scale (brand ratios,
- *    weights, colours and 8px grid are followed; absolute sizes are not), and every state
- *    that uses colour also carries a text marker — a projector washes colour out, and some
+ *    weights, colors and 8px grid are followed; absolute sizes are not), and every state
+ *    that uses color also carries a text marker — a projector washes color out, and some
  *    of the audience will not distinguish red from green.
  * 2. It must run with no network. Fonts are self-hosted, never imported from a CDN.
  */
@@ -43,8 +43,8 @@
   --violet: #6047FF;           /* secondary/500 */
 
   /* Semantic roles.
-     Red is the CTA colour, so it is deliberately NOT reused for "reject" — two meanings on
-     one colour in the same view is worse than a slightly unexpected hue. */
+     Red is the CTA color, so it is deliberately NOT reused for "reject" — two meanings on
+     one color in the same view is worse than a slightly unexpected hue. */
   --pos: #009688;              /* teal/500   — more like this */
   --neg: #FF9800;              /* orange/500 — less like this */
   --info: #03A9F4;             /* lightBlue/500 — moved up */
@@ -55,10 +55,14 @@
   --font-sans: 'Mona Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
-  /* Projector-scaled. Brand ratios, larger absolutes — the back row has to read this. */
-  --fs-base: clamp(16px, 1.15vw, 21px);
-  --fs-lg: clamp(20px, 1.7vw, 30px);
-  --fs-xl: clamp(30px, 3.6vw, 62px);
+  /* DESKTOP is the default: this app is used at a laptop far more often than it is
+     projected. Presentation mode below restores the projector scale and then some. */
+  --fs-base: clamp(14px, 0.95vw, 16px);
+  --fs-lg: clamp(17px, 1.2vw, 21px);
+  --fs-xl: clamp(26px, 2.6vw, 44px);
+  --row-pad: var(--s2);
+  --eq-h: 56px;
+  --icon: 18px;
 
   /* 8px grid */
   --s1: 8px;  --s2: 16px; --s3: 24px; --s4: 32px; --s5: 40px; --s8: 64px;
@@ -66,6 +70,26 @@
   --radius-lg: 16px;
   --maxw: 1110px;              /* brand max content width */
 }
+
+/* ---------------------------------------------------------------- presentation mode */
+/* Same token-override trick as the theme. Brand ratios are kept; the absolutes go up,
+   because the back row has to read this. */
+[data-mode='present'] {
+  --fs-base: clamp(19px, 1.4vw, 24px);
+  --fs-lg: clamp(24px, 2vw, 34px);
+  --fs-xl: clamp(36px, 4.2vw, 72px);
+  --row-pad: var(--s3);
+  --eq-h: 88px;
+  --icon: 24px;
+}
+
+/* Chrome that only earns its space while working. Nothing that carries the argument is
+   hidden here: the percentile, both bars, the prompt, the diff tags and every play control
+   stay. */
+[data-mode='present'] .keys,
+[data-mode='present'] .row .sub,
+[data-mode='present'] .row .score,
+[data-mode='present'] .clips .playrow-label { display: none; }
 
 [data-theme='light'] {
   --bg: #FFFFFF;
@@ -170,6 +194,41 @@ input:focus-visible, button:focus-visible, .row:focus-visible {
   outline-offset: 2px;
 }
 
+/* ----------------------------------------------------------------------------- icons */
+.i {
+  width: var(--icon);
+  height: var(--icon);
+  display: block;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* Square-ish padding so an icon button is a target, not a sliver. */
+button.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s1);
+  line-height: 0;
+}
+/* Busy state for an icon button. It cannot be a label swap -- writing textContent over an
+   icon button deletes the <svg> inside it, which is exactly how the Search button lost its
+   icon the first time. */
+button.icon.busy .i { animation: icon-pulse 1s ease-in-out infinite; }
+@keyframes icon-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) {
+  button.icon.busy .i { animation: none; opacity: 0.5; }
+}
+
+/* Show the icon for the theme you would switch TO, which is the one people expect. */
+[data-theme='dark'] .theme-light,
+:root:not([data-theme='light']) .theme-light { display: none; }
+[data-theme='light'] .theme-dark { display: none; }
+[data-theme='light'] .theme-light { display: block; }
+
 kbd {
   font: 400 0.8em var(--font-mono);
   border: 1px solid var(--line);
@@ -177,11 +236,6 @@ kbd {
   border-radius: 5px;
   padding: 1px 6px;
   color: var(--dim);
-}
-/* On the red CTA a dim-grey kbd reads as an empty box. */
-button.primary kbd {
-  color: #FFFFFF;
-  border-color: rgba(255, 255, 255, 0.55);
 }
 
 /* ------------------------------------------------------------------------ equalizer */
@@ -206,6 +260,7 @@ button.primary kbd {
   margin-top: var(--s1);
 }
 .transport button { padding: var(--s1) var(--s2); font-size: 0.9em; }
+.transport button.icon { padding: var(--s1); }
 .transport .time {
   font: 400 0.85em var(--font-mono);
   color: var(--dim);
@@ -214,13 +269,13 @@ button.primary kbd {
 #seek {
   flex: 1;
   min-width: 0;
-  accent-color: var(--accent);   /* native range styling, brand-coloured */
+  accent-color: var(--accent);   /* native range styling, brand-colored */
   height: 4px;
   cursor: pointer;
 }
 /* Kept short: this bar is sticky, so every pixel of it is screen the results
    don't get. 56px is still legible as a spectrum on a projector. */
-#eq { width: 100%; height: 56px; display: block; }
+#eq { width: 100%; height: var(--eq-h); display: block; }
 .viz-label {
   display: flex; gap: var(--s1);
   font: 400 0.85em var(--font-mono);
@@ -252,11 +307,35 @@ button.primary kbd {
 .chip .sign { font-weight: 600; }
 .chip.pos .sign { color: var(--pos); }
 .chip.neg .sign { color: var(--neg); }
+.chip button.icon { padding: 2px; }
 .chip button {
   border: 0; background: none; color: var(--dim);
   padding: 0 0 0 4px; font-size: 1.1em; line-height: 1;
 }
-.acts { display: flex; gap: var(--s1); }
+.acts { display: flex; gap: var(--s1); align-items: center; }
+
+/* Segmented generator toggle. Selected state carries a filled background AND
+   aria-checked, so it is not conveyed by color alone on a washed-out projector. */
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.seg button {
+  border: 0;
+  border-radius: 0;
+  padding: var(--s1) var(--s2);
+  font-size: 0.9em;
+  color: var(--dim);
+  white-space: nowrap;
+}
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-checked="true"] { background: var(--accent); color: #FFFFFF; font-weight: 600; }
+.seg button:disabled { opacity: 0.4; cursor: not-allowed; }
+.seg button:disabled:hover { background: transparent; }
+/* A disabled option that is also the checked one would render as 40%-opacity brand red,
+   which reads as a broken button rather than an unavailable one. Keep the selection legible
+   but neutral: the accent is reserved for controls you can actually press. */
+.seg button:disabled[aria-checked="true"] {
+  background: var(--panel-2);
+  color: var(--fg);
+}
 
 /* ------------------------------------------------------------------ progress ring */
 /* A ring, not a bar: `.bar` already means score/percentile in the Composed panel, and
@@ -276,6 +355,51 @@ button.primary kbd {
   stroke-dashoffset: 326.7;
   transition: stroke-dashoffset 0.4s ease;
 }
+/* Outline rather than filled: stopping is a destructive-ish action that shouldn't compete
+   with the red Compose CTA for attention, but must stay obvious under a spotlight. */
+button.danger {
+  margin-left: auto;
+  border-color: var(--neg);
+  color: var(--neg);
+}
+button.danger:hover { background: var(--neg); color: #0B0F19; border-color: var(--neg); }
+button.danger /* ----------------------------------------------------------------------------- icons */
+.i {
+  width: var(--icon);
+  height: var(--icon);
+  display: block;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* Square-ish padding so an icon button is a target, not a sliver. */
+button.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s1);
+  line-height: 0;
+}
+/* Busy state for an icon button. It cannot be a label swap -- writing textContent over an
+   icon button deletes the <svg> inside it, which is exactly how the Search button lost its
+   icon the first time. */
+button.icon.busy .i { animation: icon-pulse 1s ease-in-out infinite; }
+@keyframes icon-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) {
+  button.icon.busy .i { animation: none; opacity: 0.5; }
+}
+
+/* Show the icon for the theme you would switch TO, which is the one people expect. */
+[data-theme='dark'] .theme-light,
+:root:not([data-theme='light']) .theme-light { display: none; }
+[data-theme='light'] .theme-dark { display: none; }
+[data-theme='light'] .theme-light { display: block; }
+
+kbd { color: inherit; border-color: currentColor; }
+
 .progress-pct {
   font: 600 var(--fs-lg) var(--font-mono);
   letter-spacing: -0.5px;
@@ -312,7 +436,7 @@ button.primary kbd {
   border: 1px solid var(--line);
   border-left: 4px solid transparent;
   border-radius: var(--radius);
-  padding: var(--s2);
+  padding: var(--row-pad);
   cursor: pointer;
 }
 .row:hover { background: var(--panel-2); border-color: var(--dim); border-left-color: var(--dim); }
@@ -322,10 +446,12 @@ button.primary kbd {
 .row.is-neg { border-left-color: var(--neg); opacity: 0.58; }
 
 .rowplay {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 6px 0;
   width: 2.2rem;
-  font-size: 0.8em;
-  line-height: 1;
+  line-height: 0;
   border-color: var(--line);
   color: var(--fg);
 }
@@ -344,7 +470,7 @@ button.primary kbd {
 .mark button.on-pos { background: var(--pos); border-color: var(--pos); color: #FFFFFF; }
 .mark button.on-neg { background: var(--neg); border-color: var(--neg); color: #0B0F19; }
 
-/* Diff markers. The text label carries the meaning; colour only reinforces it. */
+/* Diff markers. The text label carries the meaning; color only reinforces it. */
 .tag {
   font: 600 0.72em var(--font-mono);
   padding: 2px 8px;
@@ -353,6 +479,9 @@ button.primary kbd {
   white-space: nowrap;
 }
 .tag.new { color: var(--pos); border-color: var(--pos); }
+/* Your own audio in a library of CC0/CC-BY tracks. Violet, so it never reads as a rank
+   change (blue/orange) or a CTA (red). */
+.tag.yours { color: var(--violet); border-color: var(--violet); }
 .tag.up { color: var(--info); border-color: var(--info); }
 .tag.down { color: var(--neg); border-color: var(--neg); }
 .row.dropped { opacity: 0.4; border-style: dashed; }
@@ -363,6 +492,37 @@ button.primary kbd {
 .empty .pos { color: var(--pos); font-weight: 600; }
 .empty .neg { color: var(--neg); font-weight: 600; }
 .keys { margin-top: var(--s4) !important; font-size: 0.85em !important; }
+
+/* -------------------------------------------------------------------------- uploads */
+.clips {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s2);
+  margin-bottom: var(--s2);
+}
+.clips-head { display: flex; align-items: baseline; gap: var(--s2); margin-bottom: var(--s1); }
+.clips-head h2 { margin: 0; font-size: 1em; font-weight: 600; letter-spacing: -0.5px; }
+.playrow.clip { grid-template-columns: 2.2rem 1fr auto; }
+.playrow.clip .rowplay { padding: 6px 0; width: 2.2rem; }
+.clip-acts { display: flex; align-items: center; gap: var(--s1); }
+.clip-acts button { padding: 6px 12px; font-size: 0.85em; }
+.clip-acts button.icon { padding: 6px; }
+
+/* Shown while a file is dragged over the window. Covers everything so there is no doubt
+   the page will take the drop. */
+.dropveil {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  border: 3px dashed var(--accent);
+  border-radius: var(--radius-lg);
+  font: 600 var(--fs-lg) var(--font-sans);
+  letter-spacing: -0.5px;
+  pointer-events: none;              /* never swallow the drop itself */
+}
 
 /* ------------------------------------------------------------------------ generated */
 .result-panel {
@@ -416,6 +576,43 @@ button.primary kbd {
 .bar > i { display: block; height: 100%; background: var(--accent); }
 .bar.baseline > i { background: var(--dim); }
 
+/* The A/B: the take, the closest human track, and the clip that conditioned it. One row
+   each, all driven by the single sticky transport above — there is deliberately no second
+   <audio controls> here, because two elements on one URL played the track twice. */
+.playrows { display: flex; flex-direction: column; gap: var(--s1); margin: var(--s2) 0; }
+.playrow {
+  display: grid;
+  grid-template-columns: 2.2rem 1fr auto;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  text-align: left;
+  padding: var(--s1) var(--s2);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.playrow:hover { border-color: var(--dim); }
+.playrow .rowplay {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 1.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  line-height: 0;
+}
+.playrow.playing { border-color: var(--accent); }
+.playrow.playing .rowplay { background: var(--accent); border-color: var(--accent); color: #FFFFFF; }
+.playrow-meta { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+/* The kind is what the audience needs to read from the back of the room; the track name is
+   supporting detail, so it gets the smaller, dimmer line. */
+.playrow-kind { font-size: 0.95em; font-weight: 600; }
+.playrow-label {
+  color: var(--dim);
+  font: 400 0.8em var(--font-mono);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.playrow-score { font-size: 0.85em; white-space: nowrap; }
+
 .banner {
   border: 1px solid var(--neg);
   color: var(--neg);
@@ -434,7 +631,6 @@ button.primary kbd {
   padding: var(--s2) var(--s3);
   z-index: 10;
 }
-audio { width: 100%; margin-top: var(--s1); }
 
 /* ---------------------------------------------------------------------- responsive */
 @media (max-width: 640px) {

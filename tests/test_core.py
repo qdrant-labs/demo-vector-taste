@@ -55,7 +55,7 @@ def test_restrictive_rejected(lic):
 
     ND matters most: a style-referenced generation is arguably a derivative work.
     SA would propagate share-alike onto generated output. Missing metadata is not a
-    licence, so it is rejected too.
+    license, so it is rejected too.
     """
     assert not is_permissive(lic)
 
@@ -133,7 +133,7 @@ def test_diff_of_identical_sets_is_unchanged():
 
 # ------------------------------------------------------------------------------ profile
 def test_profile_hash_is_order_independent():
-    """The same gestures in a different order are the same taste, so the bank must hit."""
+    """The same gestures in a different order are the same taste, so the hash must match."""
     a = TasteProfile(["p1", "p2"], ["n1"], "warm")
     b = TasteProfile(["p2", "p1"], ["n1"], "Warm ")
     assert a.hash == b.hash
@@ -178,53 +178,6 @@ def test_caption_mentions_tags_and_bpm():
     assert "jazz" in cap and "90" in cap and "D" in cap
 
 
-# ------------------------------------------------------------------- bank fallback
-def test_bank_best_match_falls_back_to_nearest_taste(tmp_path, monkeypatch):
-    """An unrehearsed taste must return the closest banked track, never silence.
-
-    The bank is keyed by taste-profile hash, and every live gesture on stage produces a new
-    hash. Exact-match lookup would hand the presenter a silent file for any improvisation.
-    """
-    import json
-
-    import numpy as np
-
-    from vector_taste import generate as gen
-
-    monkeypatch.setattr(gen, "BANK", tmp_path)
-    monkeypatch.setattr(gen, "BANK_INDEX", tmp_path / "bank.json")
-
-    near = np.zeros(512, dtype=np.float32)
-    near[0] = 1.0
-    far = np.zeros(512, dtype=np.float32)
-    far[1] = 1.0
-    for name in ("near", "far"):
-        (tmp_path / f"{name}.wav").write_bytes(b"RIFF" + b"\0" * 2048)
-    (tmp_path / "bank.json").write_text(json.dumps({
-        "near": {"file": "near.wav", "centroid": near.tolist()},
-        "far": {"file": "far.wav", "centroid": far.tolist()},
-    }))
-
-    query = np.zeros(512, dtype=np.float32)
-    query[0] = 0.9
-    query[1] = 0.1
-    path, note = gen.bank_best_match("never-baked-hash", query)
-    assert path is not None and path.name == "near.wav"
-    assert "nearest banked taste" in note
-
-    # An exact hash hit must win outright and carry no fallback note.
-    path, note = gen.bank_best_match("near", query)
-    assert path.name == "near.wav" and note == ""
-
-
-def test_bank_best_match_without_centroid_is_exact_only():
-    """No centroid to compare against means no guessing — return nothing, not a wrong track."""
-    from vector_taste.generate import bank_best_match
-
-    path, note = bank_best_match("definitely-not-a-real-hash", None)
-    assert path is None and note == ""
-
-
 # --------------------------------------------------------------- descriptors / prompts
 def _dhit(seg, descriptors, tags=("hip-hop",), bpm=100):
     return Hit(seg, 0.5, f"p-{seg}", {"descriptors": list(descriptors),
@@ -232,7 +185,7 @@ def _dhit(seg, descriptors, tags=("hip-hop",), bpm=100):
 
 
 def test_seed_differs_per_taste_and_is_stable():
-    """Every bank entry used seed=42, so identical noise made every track sound alike."""
+    """Every generation used seed=42, so identical noise made every track sound alike."""
     from vector_taste.prompt import seed_from_hash
 
     a, b = seed_from_hash("2a5559afa725"), seed_from_hash("b07e5152536a")
@@ -255,7 +208,7 @@ def test_negative_removes_shared_descriptors():
     without = contrastive_descriptors(pos, None)
     with_neg = contrastive_descriptors(pos, neg)
     assert "dreamy and hazy" in without["mood"]
-    assert "dreamy and hazy" not in with_neg["mood"]     # cancelled by the negative
+    assert "dreamy and hazy" not in with_neg["mood"]     # canceled by the negative
     assert "grand piano" in with_neg["instrument"]       # unique to the positive, survives
 
 
@@ -341,16 +294,18 @@ def test_latest_generated_prefers_newest_take(tmp_path, monkeypatch):
     assert gen.latest_generated("nosuchprofile") is None
 
 
-def test_audio_for_profile_prefers_live_over_bank(tmp_path, monkeypatch):
-    """While exploring, a fresh take beats a pre-baked one -- that was the whole bug."""
+def test_audio_for_profile_returns_the_latest_take_or_nothing(tmp_path, monkeypatch):
+    """There is no pre-baked audio to fall back on any more. When a taste has never been
+    composed there is genuinely nothing to score, and the caller has to be told so rather
+    than handed something older."""
     from vector_taste import generate as gen
 
     monkeypatch.setattr(gen, "GENERATED", tmp_path)
-    (tmp_path / "abc123-999.wav").write_bytes(b"fresh")
+    assert gen.audio_for_profile("never-composed") == (None, "")
 
-    path, note = gen.audio_for_profile("abc123", None)
-    assert path.name == "abc123-999.wav"
-    assert note == ""
+    (tmp_path / "hash-7.mp3").write_bytes(b"x")
+    path, note = gen.audio_for_profile("hash")
+    assert path.name == "hash-7.mp3" and note == ""
 
 
 # ------------------------------------------------------------------- progress reporting
@@ -388,7 +343,7 @@ def test_fraction_mapping_is_monotonic_and_starts_at_zero():
 
 def test_progress_never_goes_backwards():
     """tqdm and the callback interleave; a late lower value would look like a stall."""
-    from vector_taste.worker import Progress
+    from vector_taste.progress import Progress
 
     p = Progress()
     p.update(frac=0.5)
@@ -399,8 +354,507 @@ def test_progress_never_goes_backwards():
 
 
 def test_progress_snapshot_reports_elapsed():
-    from vector_taste.worker import Progress
+    from vector_taste.progress import Progress
 
     snap = Progress().snapshot()
     assert snap["elapsed"] >= 0
     assert "started" not in snap          # internal, not part of the API
+
+
+# ---------------------------------------------------------------------------- aborting
+def test_abort_is_not_a_generic_failure():
+    """An abort must not be reported as a failure.
+
+    Someone who pressed stop did not hit an error, so GenerationAborted has to survive the
+    `except Exception` that turns real backend faults into a GenerationError.
+    """
+    from vector_taste.generate import GenerationAborted, GenerationError
+    from vector_taste.worker import WorkerAborted, WorkerError
+
+    assert issubclass(GenerationAborted, GenerationError)
+    assert issubclass(WorkerAborted, WorkerError)
+    # ...but distinguishable, which is what lets generate() re-raise only this one.
+    assert not isinstance(GenerationError("x"), GenerationAborted)
+
+
+def test_abort_with_no_worker_is_a_no_op():
+    """Pressing stop when nothing is generating must not spawn a worker or raise."""
+    from vector_taste.worker import AceStepWorker
+
+    before = AceStepWorker._instance
+    try:
+        AceStepWorker._instance = None
+        assert AceStepWorker.abort_current() is False
+    finally:
+        AceStepWorker._instance = before
+
+
+# ------------------------------------------------------------------------- elevenlabs
+def _gp(prompt="warm acoustic guitar, sombre folk, grand piano, around 112 BPM"):
+    from vector_taste.prompt import GenerationParams
+
+    return GenerationParams(prompt=prompt, seed=42, audio_duration=30.0)
+
+
+def test_negatives_that_contradict_the_positives_are_dropped():
+    """A rejected track shares traits with the accepted ones -- that is why it surfaced.
+
+    Passing those shared traits as negative_styles would tell the model to both want and
+    avoid the same thing. Measured in a real run before this filter existed: a taste built
+    on "acoustic guitar" was sending "acoustic guitar" as a negative.
+    """
+    from vector_taste.elevenlabs import _styles_from
+
+    pos, neg = _styles_from(_gp(), ["acoustic guitar", "heavily distorted and fuzzy"])
+    assert "heavily distorted and fuzzy" in neg      # genuinely contrasting, kept
+    assert not any("acoustic guitar" == n for n in neg)
+    assert not set(pos) & set(neg)
+
+
+def test_plan_always_asks_for_instrumental():
+    """force_instrumental is prompt-only, so plan mode has to say it in the chunk."""
+    from vector_taste.elevenlabs import build_plan
+
+    chunk = build_plan(_gp(), None)["chunks"][0]
+    assert chunk["text"] == "[Instrumental]"
+    assert "vocals" in chunk["negative_styles"]
+
+
+def test_conditioning_ref_only_when_a_reference_exists():
+    from vector_taste.elevenlabs import MAX_REF_MS, build_plan
+
+    assert "conditioning_ref" not in build_plan(_gp(), None)["chunks"][0]
+    chunk = build_plan(_gp(), "song123")["chunks"][0]
+    assert chunk["conditioning_ref"]["song_id"] == "song123"
+    # The API caps a reference at 30s; our segments sit exactly at that ceiling.
+    assert chunk["conditioning_ref"]["range"]["end_ms"] <= MAX_REF_MS
+    assert chunk["condition_strength"]
+
+
+def test_chunk_duration_is_clamped_to_api_bounds():
+    from vector_taste.elevenlabs import CHUNK_MAX_MS, CHUNK_MIN_MS, build_plan
+
+    short = _gp()
+    short.audio_duration = 0.5
+    long = _gp()
+    long.audio_duration = 9999
+    assert build_plan(short, None)["chunks"][0]["duration_ms"] == CHUNK_MIN_MS
+    assert build_plan(long, None)["chunks"][0]["duration_ms"] == CHUNK_MAX_MS
+
+
+def test_abort_registry_dispatches_to_whichever_backend_is_running():
+    """Abort used to kill the ACE-Step process directly, so Stop was a silent no-op on any
+    hosted backend. The registry is what makes it work everywhere."""
+    from vector_taste.progress import abort_current, register_aborter
+
+    register_aborter(None)
+    assert abort_current() is False          # nothing running
+
+    called = []
+    register_aborter(lambda: (called.append(1), True)[1])
+    assert abort_current() is True and called
+
+    # A failing aborter must not surface as a crash mid-demo.
+    register_aborter(lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert abort_current() is False
+    register_aborter(None)
+
+
+# --------------------------------------------------------------------------- vocals
+def test_vocals_keeps_their_lyrics_and_our_everything_else():
+    """The plan endpoint supplies words; the taste supplies the music.
+
+    Overwriting their positive_styles is the point -- otherwise the retrieved taste would be
+    replaced by whatever ElevenLabs guessed from the prompt.
+    """
+    from vector_taste.elevenlabs import build_plan
+
+    lyric_chunks = [
+        {"text": "[Verse]\nCity lights are fading", "positive_styles": ["their guess"]},
+        {"text": "[Chorus]\nHold on", "positive_styles": ["their other guess"]},
+    ]
+    plan = build_plan(_gp(), "song123", None, True, lyric_chunks)
+    chunks = plan["chunks"]
+    assert [c["text"] for c in chunks] == [c["text"] for c in lyric_chunks]
+    assert all("their guess" not in c["positive_styles"] for c in chunks)
+    assert all("warm acoustic guitar" in c["positive_styles"] for c in chunks)
+    # Our duration is split across their sections rather than multiplied by them.
+    assert sum(c["duration_ms"] for c in chunks) <= _gp().audio_duration * 1000
+
+
+def test_vocals_drops_the_no_vocals_negatives():
+    """NO_VOCALS is how instrumental is enforced; leaving it in would forbid what was asked."""
+    from vector_taste.elevenlabs import build_plan
+
+    sung = build_plan(_gp(), None, ["heavily distorted and fuzzy"], vocals=True)["chunks"][0]
+    assert not any(n in sung["negative_styles"] for n in ("vocals", "singing", "choir"))
+    assert "sung vocals" in sung["positive_styles"]
+    # The contradiction filter still runs on the rejected example's descriptors.
+    assert "heavily distorted and fuzzy" in sung["negative_styles"]
+
+
+def test_vocals_falls_back_to_a_section_marker_when_the_lyric_plan_fails():
+    """Losing the lyrics must not lose the track -- same rule as a failed reference upload."""
+    from vector_taste.elevenlabs import build_plan
+
+    chunks = build_plan(_gp(), None, None, vocals=True, lyric_chunks=None)["chunks"]
+    assert len(chunks) == 1
+    assert chunks[0]["text"] == "[Verse]"
+    assert "sung vocals" in chunks[0]["positive_styles"]
+
+
+def test_conditioning_lands_on_the_first_chunk_only():
+    """Per the spec the first chunk "influences all subsequent chunks", so repeating the
+    reference on every section buys nothing and costs plan size."""
+    from vector_taste.elevenlabs import build_plan
+
+    chunks = build_plan(
+        _gp(), "song123", None, True,
+        [{"text": "[Verse]"}, {"text": "[Chorus]"}, {"text": "[Outro]"}],
+    )["chunks"]
+    assert "conditioning_ref" in chunks[0]
+    assert all("conditioning_ref" not in c for c in chunks[1:])
+
+
+def test_synthesized_prompt_stops_saying_instrumental_when_vocals_are_on():
+    from vector_taste.prompt import synthesize
+
+    assert "no vocals" in synthesize([], duration=15.0).params.prompt
+    assert "no vocals" not in synthesize([], duration=15.0, vocals=True).params.prompt
+
+
+def test_vocals_are_refused_on_backends_that_cannot_sing():
+    """A silent instrumental would give the user no way to tell the request was dropped."""
+    import pytest
+
+    from vector_taste.generate import VOCALS_BACKENDS, GenerationError, generate
+
+    assert "elevenlabs" in VOCALS_BACKENDS and "local" not in VOCALS_BACKENDS
+    with pytest.raises(GenerationError, match="cannot generate vocals"):
+        generate(_gp(), "vocalguard", backend="local", vocals=True)
+
+
+def test_the_baseline_excludes_the_whole_track_you_marked_not_just_that_chunk():
+    """A track is several 10s chunk points. Filtering the exact point the user clicked let a
+    DIFFERENT chunk of that same track come back as the "closest human" -- measured at cosine
+    0.94, which is the ~0.91-by-construction score this filter exists to keep out. It made
+    every generated result look worse than it was."""
+    from vector_taste.loop import _segments_of
+
+    class _Hit:
+        def __init__(self, seg, pid):
+            self.segment_id, self.point_id = seg, pid
+
+    marked_point, other_chunk = "p-a", "p-b"          # same track, different windows
+    results = [_Hit("trk:0", other_chunk), _Hit("trk2:0", "p-c")]
+
+    by_point = [h for h in results if h.point_id not in {marked_point}]
+    assert by_point[0].segment_id == "trk:0"          # the old filter: leaks the same track
+
+    by_segment = [h for h in results if h.segment_id not in {"trk:0"}]
+    assert by_segment[0].segment_id == "trk2:0"       # the fix: a genuinely different track
+    assert callable(_segments_of)
+
+
+# --------------------------------------------------------------------------- uploads
+def test_upload_validation_rejects_what_it_should():
+    import pytest
+
+    from vector_taste.uploads import MAX_BYTES, UploadError, validate
+
+    assert validate("song.mp3", 1000) == ".mp3"
+    assert validate("SONG.WAV", 1000) == ".wav"          # case-insensitive
+    with pytest.raises(UploadError, match="not audio"):
+        validate("resume.pdf", 1000)
+    with pytest.raises(UploadError, match="not audio"):
+        validate("noextension", 1000)
+    with pytest.raises(UploadError, match="limit"):
+        validate("song.mp3", MAX_BYTES + 1)
+    with pytest.raises(UploadError, match="empty"):
+        validate("song.mp3", 0)
+
+
+def test_uploaded_filenames_never_reach_the_filesystem(tmp_path, monkeypatch):
+    """A user-supplied name is display text, never a path. Storing under a generated name
+    closes path traversal without needing to sanitise anything."""
+    from vector_taste import uploads
+
+    monkeypatch.setattr(uploads, "UPLOADS", tmp_path / "uploads")
+    path, track_id = uploads.save(b"not really audio, but bytes", "../../../etc/passwd.wav")
+
+    assert path.parent == tmp_path / "uploads"           # stayed inside the upload dir
+    assert path.name == f"{track_id}.wav"                # nothing of the original name
+    assert ".." not in str(path)
+    assert not (tmp_path / "etc").exists()
+
+
+def test_hosted_generation_never_receives_user_audio():
+    """A hosted backend UPLOADS the style reference to a third party. An upload is somebody
+    else's file of unknown provenance, so those backends skip past it to a corpus track.
+    Local keeps the top hit -- conditioning on your own audio never leaves the machine."""
+    from vector_taste.cli import _reference_hit
+
+    class _H:
+        def __init__(self, upload, name):
+            self.payload = {"is_upload": upload, "title": name}
+
+    hits = [_H(True, "mine.wav"), _H(False, "corpus track")]
+
+    assert _reference_hit(hits, "elevenlabs").payload["title"] == "corpus track"
+    assert _reference_hit(hits, "local").payload["title"] == "mine.wav"
+    assert _reference_hit(hits, "modal").payload["title"] == "mine.wav"
+    # Nothing but uploads: send no reference at all rather than send theirs.
+    assert _reference_hit([_H(True, "mine.wav")], "elevenlabs") is None
+
+
+def test_upload_payload_cannot_claim_a_licence_it_does_not_have():
+    """The row subtitle renders `license`. Printing CC-BY over a stranger's file would be a
+    false claim in a repo whose argument is that its corpus is legally clean."""
+    import inspect
+
+    from vector_taste import uploads
+
+    src = inspect.getsource(uploads.ingest)
+    assert '"license": "your upload"' in src
+    assert '"source_url": ""' in src        # so ATTRIBUTIONS.md can never pick it up
+    assert '"is_upload": True' in src
+
+
+def test_uploads_are_excluded_from_the_scoring_population_but_not_from_search():
+    """Uploads are part of the searchable library by design. The closing percentile is a
+    different question: letting them in would make the headline depend on whatever someone
+    dropped in, and stop it being comparable between runs."""
+    import inspect
+
+    from vector_taste import search, taste
+
+    assert "NOT_UPLOAD" in inspect.getsource(taste.percentile_against_centroid)
+    # Retrieval deliberately filters only generated points.
+    assert "is_upload" not in inspect.getsource(search.merge_filters)
+    assert "is_upload" not in inspect.getsource(search._query)
+
+
+# ---------------------------------------------------------------------- corpus expansion
+def test_subset_selection_is_cumulative():
+    """FMA's `set.subset` is an ORDERED category and a track carries the SMALLEST subset it
+    belongs to, so "the large subset" means small + medium + large. Matching one value
+    exactly returned 6,435 large-only tracks instead of all 8,780 usable ones."""
+    from vector_taste.corpus import SUBSET_ORDER
+
+    assert SUBSET_ORDER == ["small", "medium", "large"]
+
+    def wanted(subset):
+        return set(SUBSET_ORDER[: SUBSET_ORDER.index(subset) + 1])
+
+    assert wanted("small") == {"small"}
+    assert wanted("medium") == {"small", "medium"}
+    assert wanted("large") == {"small", "medium", "large"}
+
+
+def test_unknown_subset_is_rejected_rather_than_silently_empty():
+    import pytest
+
+    from vector_taste.corpus import load_fma_metadata
+
+    with pytest.raises(ValueError, match="unknown subset"):
+        load_fma_metadata(subset="enormous")
+
+
+def test_range_file_seek_semantics():
+    """zipfile drives this with absolute, relative and from-the-end seeks, so all three have
+    to behave -- and clamp, because a zip reader will happily seek past either end."""
+    from unittest.mock import MagicMock
+
+    from vector_taste.fetch import HttpRangeFile
+
+    client = MagicMock()
+    client.head.return_value.headers = {"accept-ranges": "bytes", "content-length": "1000"}
+    f = HttpRangeFile("http://example/x.zip", client)
+
+    assert f.seekable() and f.size == 1000
+    assert f.seek(100) == 100
+    assert f.seek(50, 1) == 150          # relative
+    assert f.seek(-20, 2) == 980         # from the end, how a zip finds its EOCD
+    assert f.seek(-5000, 0) == 0         # clamped, never negative
+    assert f.seek(5000, 0) == 1000       # clamped to size
+    assert f.read(10) == b""             # nothing left, and no request made
+
+
+def test_range_file_refuses_a_host_that_cannot_do_ranges():
+    """Without ranges the whole technique silently degrades to downloading 100GB."""
+    from unittest.mock import MagicMock
+
+    import pytest
+
+    from vector_taste.fetch import HttpRangeFile
+
+    client = MagicMock()
+    client.head.return_value.headers = {"content-length": "1000"}
+    with pytest.raises(RuntimeError, match="byte ranges"):
+        HttpRangeFile("http://example/x.zip", client)
+
+
+def test_every_archive_has_a_url_and_a_size():
+    from vector_taste.corpus import FMA_ARCHIVES, SUBSET_ORDER
+
+    assert set(FMA_ARCHIVES) == set(SUBSET_ORDER)
+    for name, (url, size) in FMA_ARCHIVES.items():
+        assert url.startswith("https://") and url.endswith(f"fma_{name}.zip")
+        assert size > 1e9
+
+
+def test_marking_a_negative_before_any_positive_does_not_explode():
+    """The diff baseline is the POSITIVES-ONLY ranking. With no positives that profile is
+    empty, and recommend() rightly refuses an empty profile -- so clicking "-" on a track
+    before ever clicking "+" returned a 500 from /api/taste.
+
+    A negatives-only query is perfectly valid and still returns results; there is simply
+    nothing to diff it against yet, so `diff` stays None.
+    """
+    import inspect
+
+    from vector_taste.ui import app as ui
+
+    src = inspect.getsource(ui.taste)
+    # The guard must require BOTH, not just negatives.
+    assert "if req.negatives and req.positives:" in src
+    assert "if req.negatives:\n        before" not in src
+
+
+def test_an_empty_profile_is_still_refused_by_recommend():
+    """The guard above is in the caller; recommend() itself should keep rejecting nonsense."""
+    import pytest
+
+    from vector_taste.taste import TasteProfile, recommend
+
+    with pytest.raises(ValueError, match="no examples"):
+        recommend(TasteProfile([], [], ""))
+
+
+def test_a_negative_needs_a_positive_to_push_against():
+    """Unanchored, a negative is not "less like this" -- it is "maximally unlike this", and
+    the query lands on the far side of the space. Measured on the live corpus: zero of the
+    twelve results you were looking at survive, and the top scores are NEGATIVE (-0.48).
+    Anchored by one positive, 2-4 of the twelve survive.
+
+    So the API refuses it and the UI disables the button until something is marked +.
+    """
+    import inspect
+
+    from vector_taste.ui import app as ui
+
+    src = inspect.getsource(ui.taste)
+    assert "if req.negatives and not req.positives:" in src
+    assert "mark something you like first" in src
+
+
+def test_the_ui_gates_the_negative_button_and_unstrands_it():
+    """Both routes into the unanchored state have to be covered: marking - first, and
+    removing the last + while - marks remain."""
+    js = (
+        __import__("pathlib").Path("vector_taste/ui/static/app.js").read_text()
+    )
+    assert "const canMarkNegative = () => state.pos.size > 0;" in js
+    assert 'kind === "neg" && !canMarkNegative()' in js
+    assert "function dropStrandedNegatives()" in js
+    # called from BOTH the row-mark path and the chip-removal path
+    assert js.count("dropStrandedNegatives();") >= 2
+
+
+def test_the_ui_shell_and_assets_are_not_heuristically_cacheable():
+    """The shell had no Cache-Control, no ETag and no Last-Modified, which lets a browser
+    apply HEURISTIC caching and reuse both the page and the app.js it references without
+    revalidating. On a demo edited while a tab stays open all day, that presents as a fix
+    that "did not work" -- the tab is running yesterday's JavaScript.
+
+    Checked here because it is invisible from inside the app: everything looks correct
+    server-side while the screen disagrees.
+    """
+    from fastapi.testclient import TestClient
+
+    from vector_taste.ui.app import app
+
+    with TestClient(app) as c:
+        shell = c.get("/")
+        assert shell.status_code == 200
+        assert "no-store" in shell.headers.get("cache-control", "")
+
+        asset = c.get("/static/app.js")
+        assert asset.status_code == 200
+        assert asset.headers.get("cache-control") == "no-cache"
+        # no-cache means "revalidate", not "never reuse" -- the ETag keeps it cheap.
+        assert asset.headers.get("etag")
+        again = c.get("/static/app.js", headers={"If-None-Match": asset.headers["etag"]})
+        assert again.status_code == 304 and not again.content
+
+
+def test_assets_are_cache_busted_and_the_page_can_detect_its_own_staleness():
+    """no-store fixes tabs opened from now on, but a cache entry poisoned BEFORE it shipped
+    has no validators, so a browser can keep reusing it and its old app.js through ordinary
+    reloads. A changing query string is a URL the cache has never seen, which is the only
+    thing that reliably breaks that. The build stamp then lets a loaded page notice it is
+    running code the server no longer serves -- otherwise every fix looks like it failed.
+    """
+    from fastapi.testclient import TestClient
+
+    from vector_taste.ui.app import app, build_id
+
+    v = build_id()
+    with TestClient(app) as c:
+        html = c.get("/").text
+        assert f'/static/app.js?v={v}' in html
+        assert f'/static/app.css?v={v}' in html
+        assert f'<body data-build="{v}"' in html
+        assert c.get("/api/status").json()["build"] == v
+
+
+def test_the_build_id_changes_when_the_front_end_changes(tmp_path, monkeypatch):
+    import os
+
+    from vector_taste.ui import app as ui
+
+    before = ui.build_id()
+    js = ui.STATIC / "app.js"
+    stat = js.stat()
+    try:
+        os.utime(js, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+        assert ui.build_id() != before
+    finally:
+        os.utime(js, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    assert ui.build_id() == before
+
+
+# --------------------------------------------------------------- no fallback, on purpose
+def test_a_failing_backend_raises_instead_of_serving_something_older():
+    """Every backend used to degrade silently to pre-baked audio, and to a generated silent
+    wav when there was none. That made a broken generator indistinguishable from a working
+    one -- you found out after the talk, not during it. Now it raises with the reason.
+    """
+    import pytest
+
+    from vector_taste.generate import GenerationError, generate
+    from vector_taste.prompt import GenerationParams
+
+    params = GenerationParams(prompt="x", seed=1, audio_duration=5.0)
+    with pytest.raises(GenerationError, match="unknown GEN_BACKEND"):
+        generate(params, "nofallback", backend="does-not-exist")
+
+
+def test_nothing_pre_baked_survives_in_the_generation_module():
+    """The bank is gone: no index, no nearest-taste match, no silent placeholder, and no
+    `from_bank` flag for the UI to label."""
+    import inspect
+
+    from vector_taste import generate as gen
+
+    src = inspect.getsource(gen)
+    for gone in ("bank_best_match", "bank_lookup", "bank_add", "bank_status",
+                 "_placeholder", "BANK_INDEX", "from_bank"):
+        assert gone not in src, gone
+    assert "bank" not in gen.available_backends()
+
+
+def test_the_ui_offers_only_generators_that_generate():
+    html = __import__("pathlib").Path("vector_taste/ui/static/index.html").read_text()
+    assert 'data-backend="bank"' not in html
+    assert 'data-backend="local"' in html and 'data-backend="elevenlabs"' in html

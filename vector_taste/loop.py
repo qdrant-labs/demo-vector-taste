@@ -21,6 +21,7 @@ import numpy as np
 
 from . import store
 from .embed import embed_audio_file
+from .search import Hit
 from .taste import TasteProfile, percentile_against_centroid, recommend, taste_centroid
 
 _NS = uuid.UUID("5f3d9a1e-0001-4000-8000-000000000000")
@@ -43,6 +44,9 @@ class LoopResult:
     baseline_percentile: float
     n_chunks: int
     run_id: str
+    # WHICH track the baseline cosine belongs to, so the UI can play it. Trailing and
+    # defaulted: summary() and the CLI predate it and must keep working unchanged.
+    baseline_hit: Hit | None = None
 
     @property
     def beats_baseline(self) -> bool:
@@ -59,7 +63,7 @@ class LoopResult:
                 "",
                 f"  The generated track lands at the {ordinal(self.percentile)} percentile.",
                 f"  Closer to your taste centroid than {self.percentile:.0f}% of the "
-                f"{self.population} segments in the library.",
+                f"{self.population} corpus segments (uploads excluded).",
                 "",
                 f"    generated   cosine {self.cosine:+.4f}   percentile {self.percentile:5.1f}",
                 f"    best human  cosine {self.baseline_cosine:+.4f}   "
@@ -98,10 +102,18 @@ def close_loop(
     # comparing it to the question rather than to an answer, and makes any result look bad.
     # The fair question is "how close did the machine get, versus the closest thing the
     # library already had that you hadn't already picked?"
-    chosen = set(profile.positives)
-    top = [h for h in recommend(profile, limit=10) if h.point_id not in chosen]
-    if top:
-        b_cos, b_pct, _ = percentile_against_centroid(_fetch_one(top[0].point_id), centroid_vec)
+    # Exclude by SEGMENT, not point id. A track is several 10s chunk points, so filtering on
+    # the exact point the user clicked lets a DIFFERENT chunk of that same track come back as
+    # the "closest human" -- measured: marking one chunk of a track returned another chunk of
+    # it at cosine 0.94. That is the ~0.91-by-construction score this filter exists to keep
+    # out, and it makes every generated result look worse than it is.
+    chosen = _segments_of(profile.positives)
+    top = [h for h in recommend(profile, limit=10) if h.segment_id not in chosen]
+    baseline_hit = top[0] if top else None
+    if baseline_hit:
+        b_cos, b_pct, _ = percentile_against_centroid(
+            _fetch_one(baseline_hit.point_id), centroid_vec
+        )
     else:
         b_cos, b_pct = float("nan"), float("nan")
 
@@ -129,7 +141,7 @@ def close_loop(
                         "license": "generated",
                         "source_url": "",
                         # The flag every demo query filters on. Without it these points
-                        # become search neighbours and shift the number on re-runs.
+                        # become search neighbors and shift the number on re-runs.
                         "is_generated": True,
                         "generation_run_id": run_id,
                         "audio_path": str(audio_path),
@@ -146,7 +158,18 @@ def close_loop(
         baseline_percentile=b_pct,
         n_chunks=len(vecs),
         run_id=run_id,
+        baseline_hit=baseline_hit,
     )
+
+
+def _segments_of(point_ids: list[str]) -> set[str]:
+    """Which segments these marked points belong to."""
+    if not point_ids:
+        return set()
+    from .config import COLLECTION, get_client
+
+    recs = get_client().retrieve(COLLECTION, ids=list(point_ids), with_payload=True)
+    return {(r.payload or {}).get("segment_id", str(r.id)) for r in recs}
 
 
 def _fetch_one(point_id: str) -> np.ndarray:

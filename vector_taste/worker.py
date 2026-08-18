@@ -16,10 +16,10 @@ import os
 import re
 import subprocess
 import threading
-import time
 from pathlib import Path
 
 from .config import ROOT
+from .progress import PROGRESS, register_aborter
 
 log = logging.getLogger("vector_taste.worker")
 
@@ -60,36 +60,7 @@ def map_fraction(raw: float) -> tuple[float, str]:
     return 0.0, "preparing"
 
 
-class Progress:
-    """Latest progress for the in-flight job. One job runs at a time (job lock)."""
 
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self.reset()
-
-    def reset(self, phase: str = "idle") -> None:
-        with self._lock:
-            self._d = {
-                "phase": phase, "frac": 0.0, "step": 0, "total": 0,
-                "desc": "", "started": time.time(), "job": None,
-            }
-
-    def update(self, **kw) -> None:
-        with self._lock:
-            # Never let the bar go backwards: tqdm and the callback interleave, and a
-            # late-arriving lower fraction would look like a stall or a restart.
-            if "frac" in kw and kw["frac"] < self._d.get("frac", 0.0):
-                kw.pop("frac")
-            self._d.update(kw)
-
-    def snapshot(self) -> dict:
-        with self._lock:
-            d = dict(self._d)
-        d["elapsed"] = round(time.time() - d.pop("started", time.time()), 1)
-        return d
-
-
-PROGRESS = Progress()
 
 # Generous: a cold worker loads ~9GB of checkpoints and compiles MLX graphs.
 READY_TIMEOUT = float(os.getenv("VT_WORKER_READY_TIMEOUT", "900"))
@@ -98,6 +69,14 @@ JOB_TIMEOUT = float(os.getenv("VT_WORKER_JOB_TIMEOUT", "900"))
 
 class WorkerError(RuntimeError):
     pass
+
+
+class WorkerAborted(WorkerError):
+    """Raised in the blocked generate() call when the user aborts.
+
+    Distinct from a failure on purpose: an abort is not an error to report. Someone who
+    pressed stop wants silence, not a track they didn't ask for.
+    """
 
 
 def acestep_dir() -> Path:
@@ -124,7 +103,7 @@ class AceStepWorker:
         if py is None:
             raise WorkerError(
                 f"ACE-Step is not installed at {acestep_dir()}. "
-                "Run ./scripts/acestep_setup.sh, or use GEN_BACKEND=bank."
+                "Run ./scripts/acestep_setup.sh, or use GEN_BACKEND=elevenlabs."
             )
         self._proc = subprocess.Popen(  # noqa: S603
             [str(py), str(WORKER)],
@@ -141,6 +120,7 @@ class AceStepWorker:
             env={**os.environ, "PYTHONUNBUFFERED": "1", "TOKENIZERS_PARALLELISM": "false"},
         )
         self._job_lock = threading.Lock()
+        self._aborted = False
         threading.Thread(target=self._drain_stderr, daemon=True).start()
 
         log.info("ACE-Step worker starting (this takes a minute or two on first run)")
@@ -225,6 +205,10 @@ class AceStepWorker:
         if not done.wait(timeout):
             raise WorkerError(f"ACE-Step worker timed out after {timeout:.0f}s")
         if not result:
+            # Killing the process closes stdout, so an abort surfaces here as a closed
+            # stream. Report it as an abort rather than a crash.
+            if self._aborted:
+                raise WorkerAborted("generation aborted")
             raise WorkerError("ACE-Step worker exited unexpectedly (check its stderr)")
         return result
 
@@ -236,12 +220,15 @@ class AceStepWorker:
                 PROGRESS.reset("idle")
                 raise WorkerError("ACE-Step worker has exited; it will respawn next call")
             PROGRESS.reset("preparing")
-            PROGRESS.update(job=job.get("id"), desc="preparing")
+            PROGRESS.update(job=job.get("id"), desc="preparing", backend="local")
+            # Tell the abort registry how to cancel THIS backend.
+            register_aborter(self.abort)
             self._proc.stdin.write(json.dumps(job) + "\n")
             self._proc.stdin.flush()
             try:
                 ev = self._read_event(JOB_TIMEOUT)
             finally:
+                register_aborter(None)
                 PROGRESS.update(phase="done", frac=1.0, desc="done")
 
         if not ev.get("ok"):
@@ -251,6 +238,33 @@ class AceStepWorker:
             raise WorkerError(f"worker reported {path}, which does not exist")
         log.info("generated %s in %ss", path.name, ev.get("seconds"))
         return path
+
+    def abort(self) -> bool:
+        """Stop the in-flight generation immediately. Returns False if nothing was running.
+
+        ACE-Step exposes no cancellation: its `progress` callback only fires at phase
+        boundaries (0.51, 0.52, 0.80, 0.99), so a cooperative flag checked there would take
+        up to ~70s to land if the abort arrives during diffusion — which is exactly when
+        someone is most likely to press stop. Killing the process is the only thing that
+        actually stops it now.
+
+        The cost is the ~150s model load, so a re-warm is kicked off immediately and runs in
+        the background while the user carries on marking tracks.
+        """
+        if self._proc.poll() is not None:
+            return False
+        self._aborted = True
+        PROGRESS.update(phase="aborting", desc="aborting…")
+        log.warning("aborting generation: killing the ACE-Step worker")
+        try:
+            self._proc.kill()
+            self._proc.wait(timeout=10)
+        except Exception:  # noqa: BLE001 - already tearing down
+            pass
+        AceStepWorker._instance = None
+        PROGRESS.reset("aborted")
+        prewarm()          # reload in the background; the UI shows "warming model"
+        return True
 
     def close(self) -> None:
         try:
@@ -267,6 +281,12 @@ class AceStepWorker:
             if cls._instance is None or cls._instance._proc.poll() is not None:
                 cls._instance = cls()
             return cls._instance
+
+    @classmethod
+    def abort_current(cls) -> bool:
+        """Abort whatever is generating, if anything. Never spawns a worker to do it."""
+        inst = cls._instance
+        return inst.abort() if inst is not None else False
 
     @classmethod
     def shutdown(cls) -> None:

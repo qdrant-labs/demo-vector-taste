@@ -11,7 +11,7 @@ import shutil
 import socket
 from pathlib import Path
 
-from .config import AUDIO, CLAP_MODEL, COLLECTION, DATA, get_client, is_cloud
+from .config import AUDIO, CLAP_MODEL, COLLECTION, DATA, GEN_BACKEND, get_client, is_cloud
 
 OK, WARN, FAIL, SKIP = "PASS", "WARN", "FAIL", "SKIP"
 
@@ -67,19 +67,6 @@ def check_audio_files():
     return _row(OK, "corpus audio", f"{n} files")
 
 
-def check_bank():
-    from .generate import bank_status
-
-    st = bank_status()
-    if st["entries"] == 0:
-        return _row(WARN, "generation bank", "empty", "run: uv run vt bake")
-    if not st["complete"]:
-        missing = st["entries"] - st["files_present"]
-        return _row(FAIL, "generation bank", f"{missing} entries missing audio",
-                    "run: uv run vt bake")
-    return _row(OK, "generation bank", f"{st['entries']} entries")
-
-
 def check_profiles():
     profiles = sorted(DATA.glob("taste_*.json"))
     if not profiles:
@@ -96,12 +83,46 @@ def check_offline():
     problems = []
     if is_cloud():
         problems.append("QDRANT_URL points at Cloud")
-    if os.getenv("GEN_BACKEND") in ("replicate", "modal"):
-        problems.append(f"GEN_BACKEND={os.getenv('GEN_BACKEND')} needs network")
+    # elevenlabs is the DEFAULT now, so this is a statement of fact rather than a
+    # misconfiguration. It is still worth saying out loud before a talk: there is no
+    # fallback any more, so a network failure is a visible one.
+    backend = os.getenv("GEN_BACKEND") or GEN_BACKEND
+    if backend in ("replicate", "modal", "elevenlabs"):
+        problems.append(f"generation via {backend} needs network")
     if problems:
         return _row(WARN, "offline safety", "; ".join(problems),
-                    "for stage: unset QDRANT_URL/API_KEY, GEN_BACKEND=bank")
+                    "to run fully offline: unset QDRANT_URL/API_KEY, GEN_BACKEND=local")
     return _row(OK, "offline safety", "all demo-path components are local")
+
+
+def check_elevenlabs():
+    """Only meaningful when this backend is actually selected.
+
+    A key that is present but rejected is the failure worth catching early: it surfaces as a
+    401 mid-compose otherwise.
+    """
+    from .elevenlabs import api_key
+
+    if os.getenv("GEN_BACKEND") != "elevenlabs":
+        return _row(OK, "elevenlabs", "not selected"
+                    + (" (key present)" if api_key() else ""))
+    if not api_key():
+        return _row(FAIL, "elevenlabs", "ELEVENLABS_API_KEY not set",
+                    "add it to .env.local, or set GEN_BACKEND=local")
+
+    import httpx
+
+    try:
+        r = httpx.get(
+            "https://api.elevenlabs.io/v1/user/subscription",
+            headers={"xi-api-key": api_key()}, timeout=15,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _row(WARN, "elevenlabs", f"could not reach the API ({exc})")
+    if r.status_code != 200:
+        return _row(FAIL, "elevenlabs", f"key rejected (HTTP {r.status_code})",
+                    "check ELEVENLABS_API_KEY")
+    return _row(OK, "elevenlabs", f"tier {r.json().get('tier', '?')}")
 
 
 def check_audio_output():
@@ -138,9 +159,9 @@ CHECKS = [
     check_no_generated,
     check_models,
     check_audio_files,
-    check_bank,
     check_profiles,
     check_offline,
+    check_elevenlabs,
     check_port,
     check_audio_output,
 ]

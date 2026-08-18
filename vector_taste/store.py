@@ -26,6 +26,7 @@ INDEXES: dict[str, models.PayloadSchemaType] = {
     "tags": models.PayloadSchemaType.KEYWORD,
     "bpm": models.PayloadSchemaType.INTEGER,
     "is_generated": models.PayloadSchemaType.BOOL,  # excludes generated from retrieval
+    "is_upload": models.PayloadSchemaType.BOOL,  # user audio: purged on start, not scored
 }
 
 # Named vectors. `lyrics` is deliberately absent in v1: it would be a third named vector
@@ -105,7 +106,7 @@ def count(only_generated: bool | None = None) -> int:
 def delete_generated() -> int:
     """Purge generated points.
 
-    Needed because generated points would otherwise become search neighbours and shift the
+    Needed because generated points would otherwise become search neighbors and shift the
     finale percentile on the second rehearsal run - a bug that only appears on a re-run.
     """
     n = count(only_generated=True)

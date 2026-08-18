@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from .config import COLLECTION, DATA, GEN_BACKEND, is_cloud
+from .corpus import FMA_ARCHIVES
 
 
 def _p(*a):
@@ -22,7 +23,13 @@ def _p(*a):
 def cmd_fetch(args):
     from .fetch import fetch_all
 
-    fetch_all(audio=not args.metadata_only)
+    fetch_all(
+        audio=not args.metadata_only,
+        subset=args.subset,
+        selective=not args.full_archive,
+        workers=args.workers,
+        limit=args.limit,
+    )
     return 0
 
 
@@ -162,7 +169,11 @@ def cmd_generate(args):
     # A cached prompt is reused only when pinning the seed. Otherwise every run must
     # re-synthesize so it picks up a NEW seed -- reusing the cache would replay the
     # previous take.
+    # A cached prompt was built for one vocal setting; reusing it across the toggle would
+    # silently generate the other one.
     synth = load_prompt(profile.hash) if (args.seed or args.reproducible) else None
+    if synth is not None and bool(synth.evidence.get("vocals")) != bool(args.vocals):
+        synth = None
     if synth is not None:
         synth.params.seed = _resolve_seed(args, profile.hash)
     if synth is None:
@@ -171,25 +182,24 @@ def cmd_generate(args):
             negatives=negative_hits(profile),
             seed=_resolve_seed(args, profile.hash),
             steps=args.steps,
+            vocals=args.vocals,
         )
         save(profile.hash, synth)
 
-    # Reference clip: a 30s window centred on the WINNING chunk, not the raw segment.
+    # Reference clip: a 30s window centered on the WINNING chunk, not the raw segment.
     # Retrieval scored the segment by its best chunk, so handing the model the whole segment
     # could condition it on the intro that did not match.
     ref = None
     if hits and not args.no_reference:
-        ref = _reference_clip(hits[0])
+        ref = _reference_clip(_reference_hit(hits, args.backend))
 
-    from .taste import taste_centroid
-
-    centroid = taste_centroid(profile) if profile.positives else None
     res = generate(
         synth.params, profile.hash, reference_audio=ref,
-        backend=args.backend, centroid=centroid,
+        backend=args.backend, vocals=args.vocals,
     )
     _p("")
-    _p(f"  backend    {res.backend}{'  (from bank)' if res.from_bank else ''}")
+    _p(f"  backend    {res.backend}")
+    _p(f"  vocals     {'yes' if args.vocals else 'no (instrumental)'}")
     _p(f"  reference  {ref.name if ref else '(none)'}")
     _p(f"  audio      {res.path}")
     if res.note:
@@ -208,8 +218,27 @@ def _resolve_seed(args, profile_hash: str) -> int:
     return fresh_seed()
 
 
+def _reference_hit(hits, backend: str | None):
+    """Which hit conditions the generation.
+
+    Normally the top one. But a hosted backend UPLOADS this clip to a third party, and an
+    upload is somebody's own file of unknown provenance -- so on those backends we skip past
+    uploads to the first corpus track. Local generation keeps the top hit whatever it is:
+    conditioning on your own upload is a good result and never leaves this machine.
+    """
+    from .generate import AUDIO_LEAVES_MACHINE
+
+    if (backend or GEN_BACKEND) not in AUDIO_LEAVES_MACHINE:
+        return hits[0]
+    for h in hits:
+        if not h.payload.get("is_upload"):
+            return h
+    _p("  note       every hit is an upload; generating without a style reference")
+    return None
+
+
 def _reference_clip(hit) -> Path | None:
-    """Extract a 30s window centred on the hit's winning chunk."""
+    """Extract a 30s window centered on the hit's winning chunk."""
     import numpy as np
     import soundfile as sf
 
@@ -224,9 +253,9 @@ def _reference_clip(hit) -> Path | None:
         return None
 
     wav = load_audio(src)
-    centre = int(hit.start_sec + 5) * SAMPLE_RATE  # middle of the 10s winning chunk
+    center = int(hit.start_sec + 5) * SAMPLE_RATE  # middle of the 10s winning chunk
     half = 15 * SAMPLE_RATE
-    start = max(0, centre - half)
+    start = max(0, center - half)
     clip = wav[start : start + 2 * half]
     if len(clip) < SAMPLE_RATE:
         return None
@@ -235,16 +264,6 @@ def _reference_clip(hit) -> Path | None:
     DATA.mkdir(parents=True, exist_ok=True)
     sf.write(out, np.asarray(clip, dtype="float32"), SAMPLE_RATE)
     return out
-
-
-def cmd_bake(args):
-    from .bake import bake_bank, import_bank
-
-    if args.import_from:
-        return 0 if import_bank(Path(args.import_from)) else 1
-    bake_bank(profiles=args.profile, backend=args.backend,
-              duration=args.duration, steps=args.steps)
-    return 0
 
 
 # ----------------------------------------------------------------------------------- loop
@@ -309,12 +328,74 @@ def cmd_info(args):
     return 0
 
 
+def cmd_corpus(args):
+    """What corpus is available, ingested, and on disk -- without touching the network."""
+    from .corpus import SUBSET_ORDER, fma_audio_path, load_fma_metadata
+    from .store import count as store_count
+
+    _p("")
+    _p(f"  {'subset':8s} {'usable':>8s} {'on disk':>9s} {'archive':>10s}")
+    _p("  " + "-" * 40)
+    for sub in SUBSET_ORDER:
+        try:
+            rows = load_fma_metadata(subset=sub)
+        except FileNotFoundError:
+            _p(f"  {sub:8s} (metadata not fetched — run `vt fetch --metadata-only`)")
+            break
+        have = sum(1 for r in rows if fma_audio_path(r["track_id"]).exists())
+        gb = FMA_ARCHIVES[sub][1] / 1e9
+        _p(f"  {sub:8s} {len(rows):8,d} {have:9,d} {gb:9.1f}G")
+    _p("")
+    try:
+        _p(f"  ingested   {store_count():,} points in '{COLLECTION}'")
+    except Exception as exc:  # noqa: BLE001 - qdrant may simply not be up
+        _p(f"  ingested   (qdrant unavailable: {str(exc)[:50]})")
+    _p("")
+    _p("  'usable' counts only CC0 / CC-BY tracks — the licence filter is the ceiling,")
+    _p("  not the download. Expand with:  vt fetch --subset large && vt ingest --subset large")
+    _p("")
+    return 0
+
+
+def cmd_upload(args):
+    """Embed a local audio file into the collection, same as dropping it on the UI."""
+    from pathlib import Path as _Path
+
+    from .uploads import UploadError, ingest, save
+
+    src = _Path(args.path)
+    if not src.is_file():
+        _p(f"error: no such file {src}")
+        return 2
+    try:
+        path, track_id = save(src.read_bytes(), src.name)
+        clip = ingest(path, track_id, src.name)
+    except UploadError as exc:
+        _p(f"error: {exc}")
+        return 2
+    _p("")
+    _p(f"  track      {clip['title']}")
+    _p(f"  points     {clip['points']} across {clip['segments']} segment(s)")
+    _p(f"  duration   {clip['seconds']}s{'  (truncated)' if clip['truncated'] else ''}")
+    _p(f"  bpm / key  {clip['bpm'] or '-'} · {clip['key'] or '-'}")
+    _p("")
+    from .search import format_table
+    from .taste import TasteProfile, recommend
+
+    _p(format_table(recommend(TasteProfile(positives=clip["point_ids"]), limit=args.limit),
+                    "nearest in the library:"))
+    return 0
+
+
 def cmd_reset(args):
     from .store import delete_generated, ensure_collection
+    from .uploads import purge as purge_uploads
 
     if args.all:
         ensure_collection(recreate=True)
         _p("  collection recreated (empty)")
+    elif args.uploads:
+        _p(f"  purged {purge_uploads()} upload points")
     else:
         _p(f"  purged {delete_generated()} generated points")
     return 0
@@ -349,7 +430,16 @@ def main(argv=None) -> int:
 
     f = sub.add_parser("fetch", help="download corpus + metadata")
     f.add_argument("--metadata-only", action="store_true")
+    f.add_argument("--subset", default="small", choices=["small", "medium", "large"],
+                   help="how much of FMA to fetch (cumulative; default small)")
+    f.add_argument("--full-archive", action="store_true",
+                   help="download the whole zip instead of pulling only usable tracks")
+    f.add_argument("--workers", type=int, default=8)
+    f.add_argument("--limit", type=int, help="fetch at most N new tracks (selective only)")
     f.set_defaults(func=cmd_fetch)
+
+    c = sub.add_parser("corpus", help="what corpus is available, ingested and on disk")
+    c.set_defaults(func=cmd_corpus)
 
     i = sub.add_parser("ingest", help="segment, embed, upsert, write attributions")
     i.add_argument("--limit", type=int)
@@ -404,19 +494,10 @@ def main(argv=None) -> int:
     g.add_argument("--reproducible", action="store_true",
                    help="derive the seed from the taste instead of composing anew")
     g.add_argument("--no-reference", action="store_true")
+    g.add_argument("--vocals", action="store_true",
+                   help="sing rather than play (elevenlabs only)")
     g.set_defaults(func=cmd_generate)
 
-    bk = sub.add_parser("bake", help="pre-generate the bank")
-    bk.add_argument("--profile", action="append")
-    bk.add_argument("--backend", default="local")
-    bk.add_argument("--duration", type=float, default=30.0)
-    bk.add_argument("--steps", type=int, default=8)
-    bk.add_argument(
-        "--import-from",
-        metavar="DIR",
-        help="adopt <profile_hash>.wav files baked on another machine",
-    )
-    bk.set_defaults(func=cmd_bake)
 
     lp = sub.add_parser("loop", help="re-embed the generated track and score it")
     lp.add_argument("profile")
@@ -434,8 +515,14 @@ def main(argv=None) -> int:
     sub.add_parser("timings", help="per-stage wall clock").set_defaults(func=cmd_timings)
     sub.add_parser("info", help="collection status").set_defaults(func=cmd_info)
 
+    up = sub.add_parser("upload", help="embed your own audio file and show its neighbors")
+    up.add_argument("path")
+    up.add_argument("--limit", type=int, default=10)
+    up.set_defaults(func=cmd_upload)
+
     r = sub.add_parser("reset", help="purge generated points (or everything)")
     r.add_argument("--all", action="store_true")
+    r.add_argument("--uploads", action="store_true", help="purge user uploads only")
     r.set_defaults(func=cmd_reset)
 
     pf = sub.add_parser("preflight", help="pre-demo checklist")
@@ -455,6 +542,11 @@ def main(argv=None) -> int:
     try:
         return args.func(args)
     except KeyboardInterrupt:
+        # Stop the ACE-Step child too. It is a separate process holding ~4GB, and leaving
+        # it resident after Ctrl+C would strand that memory.
+        from .progress import abort_current
+
+        abort_current()
         _p("\ninterrupted")
         return 130
     except FileNotFoundError as exc:

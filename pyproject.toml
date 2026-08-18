@@ -21,6 +21,8 @@ dependencies = [
     "pandas>=2.2,<3",
     "pyarrow>=16,<22",
     "fastapi>=0.115,<1",
+    # FastAPI raises at import time on an UploadFile route without it.
+    "python-multipart>=0.0.9,<1",
     "uvicorn>=0.30,<1",
     "python-dotenv>=1.0,<2",
     "httpx>=0.27,<1",
@@ -51,9 +53,9 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
 ignore = [
-    # Broad excepts are deliberate in exactly two places: the generation backend, which must
-    # always degrade to the pre-baked bank rather than surface a traceback during a live
-    # demo, and preflight, where one failing check must not abort the rest of the checklist.
+    # Broad excepts are deliberate in exactly two places: the generation dispatcher, which
+    # turns any backend fault into one GenerationError carrying a readable message, and
+    # preflight, where one failing check must not abort the rest of the checklist.
     "B904",
     "E501",  # long lines are caught by the formatter, not the linter
 ]

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Start Qdrant locally. Uses whichever of podman or docker is installed.
 #
-# Pinned to an exact version on purpose: `:latest` would change search behaviour under a
+# Pinned to an exact version on purpose: `:latest` would change search behavior under a
 # saved demo, and snapshot/format compatibility is version-scoped. A live demo should
 # never be surprised by an upgrade.
 set -euo pipefail

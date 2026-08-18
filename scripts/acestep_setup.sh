@@ -7,7 +7,7 @@
 #   localhost REST API. That is still fully offline, and it keeps the model resident
 #   between requests — loading it costs far more than generating with it.
 #
-# Not needed for the default demo: GEN_BACKEND=bank plays pre-generated audio.
+# Not needed for the default demo: GEN_BACKEND=elevenlabs generates in seconds over the network.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

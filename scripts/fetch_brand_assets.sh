@@ -9,7 +9,7 @@
 # Re-run it to refresh them; it prints checksums so you can diff against what is committed.
 #
 # Fonts are SIL Open Font License 1.1 (see the OFL files it downloads alongside them).
-# OFL permits redistribution inside another repo as long as the licence travels with the
+# OFL permits redistribution inside another repo as long as the license travels with the
 # files. The repo is Apache-2.0; the fonts remain OFL-1.1.
 set -euo pipefail
 
@@ -51,7 +51,7 @@ echo "logos -> $IMG"
 # no flash on load.
 get "$LOGOS/qdrant-logo-red-white.svg" "$IMG/qdrant-logo-red-white.svg"
 get "$LOGOS/qdrant-logo-red-black.svg" "$IMG/qdrant-logo-red-black.svg"
-# Qdrant publishes no full-colour SVG favicon (/favicon.svg 404s; only a monochrome
+# Qdrant publishes no full-color SVG favicon (/favicon.svg 404s; only a monochrome
 # safari-pinned-tab.svg exists), so the brandmark serves as one.
 get "$LOGOS/qdrant-brandmark-red.svg"  "$IMG/qdrant-brandmark-red.svg"
 

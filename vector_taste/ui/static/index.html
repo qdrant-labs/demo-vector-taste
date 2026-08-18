@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="dark" data-mode="desktop">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -14,9 +14,14 @@
     if (!t) t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
     document.documentElement.dataset.theme = t;
   } catch (e) { /* private mode: fall through to the dark default on <html> */ }
+  // Density, same treatment: applied here or the page renders at one scale and reflows to
+  // the other. Desktop is the default -- presentation is opt-in.
+  try {
+    document.documentElement.dataset.mode = localStorage.getItem('vt-mode') || 'desktop';
+  } catch (e) { document.documentElement.dataset.mode = 'desktop'; }
 </script>
 
-<!-- Qdrant publishes no full-colour SVG favicon, so the brandmark serves as one. -->
+<!-- Qdrant publishes no full-color SVG favicon, so the brandmark serves as one. -->
 <link rel="icon" type="image/svg+xml" href="/static/img/qdrant-brandmark-red.svg">
 
 <!-- crossorigin is required even same-origin, or the browser fetches each font twice. -->
@@ -25,6 +30,36 @@
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
+
+<!-- Icon sprite. Inline, not a file and certainly not a CDN: this app has to run with no
+     network at all, which is the same reason the fonts are self-hosted. Lucide-style
+     geometry (24x24, stroke 2, round caps) per the Qdrant brand guidance naming Lucide as
+     the icon base — drawn here rather than vendored, so nothing is fetched. -->
+<svg xmlns="http://www.w3.org/2000/svg" hidden aria-hidden="true">
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4.3-4.3"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M8 7l4-4 4 4"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+  <symbol id="i-present" viewBox="0 0 24 24"><path d="M2 4h20"/><path d="M3 4v10a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V4"/><path d="M12 15v6M9 21l3-3 3 3"/><path d="M7 11l3-3 2.5 2.5L17 6"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z" fill="currentColor" stroke-linejoin="round"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 4v16M15 4v16"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <!-- Back/forward with the quantity INSIDE the arc. A bare arrow loses the "15", which is
+       the only part of this control anyone needs to read. -->
+  <symbol id="i-back15" viewBox="0 0 24 24">
+    <path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3 3v4h4"/>
+    <text x="12" y="15.6" font-size="8.5" font-weight="700" text-anchor="middle"
+          fill="currentColor" stroke="none" font-family="system-ui, sans-serif">15</text>
+  </symbol>
+  <symbol id="i-fwd15" viewBox="0 0 24 24">
+    <path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M21 3v4h-4"/>
+    <text x="12" y="15.6" font-size="8.5" font-weight="700" text-anchor="middle"
+          fill="currentColor" stroke="none" font-family="system-ui, sans-serif">15</text>
+  </symbol>
+</svg>
+
 <header>
   <div class="brand">
     <!-- Both lockups ship and swap by CSS on the theme, so there is no flash and no JS
@@ -35,15 +70,38 @@
     <h1>Vector<span class="accent">Taste</span></h1>
   </div>
   <div class="status" id="status" role="status" aria-live="polite">connecting…</div>
-  <button id="theme" class="ghost" aria-label="Toggle light and dark theme"
-          title="Toggle theme (T)">Theme <kbd>T</kbd></button>
+  <!-- Density. Desktop is the default; presentation is for the projector. -->
+  <div class="seg" id="modes" role="radiogroup" aria-label="Display mode">
+    <button data-mode="desktop" role="radio" aria-checked="true" class="icon"
+            aria-label="Desktop mode" title="Desktop — dense, full detail (M)"><svg class="i"><use href="#i-monitor"/></svg></button>
+    <button data-mode="present" role="radio" aria-checked="false" class="icon"
+            aria-label="Presentation mode" title="Presentation — large, stripped back (M)"><svg class="i"><use href="#i-present"/></svg></button>
+  </div>
+  <button id="theme" class="ghost icon" aria-label="Toggle light and dark theme"
+          title="Toggle theme (T)"><svg class="i theme-dark"><use href="#i-sun"/></svg><svg class="i theme-light"><use href="#i-moon"/></svg></button>
 </header>
 
 <section class="searchbar">
   <input id="q" type="search" placeholder="Describe a sound —  &ldquo;dreamy lo-fi with vinyl crackle&rdquo;"
          autocomplete="off" aria-label="Search by sound">
-  <button id="go" class="primary">Search</button>
+  <button id="go" class="primary icon" aria-label="Search" title="Search"><svg class="i"><use href="#i-search"/></svg></button>
+  <!-- The whole page is also a drop target; this is the discoverable route to the same thing. -->
+  <button id="uploadbtn" class="ghost icon" aria-label="Upload your own audio"
+          title="Add your own audio and find its neighbors"><svg class="i"><use href="#i-upload"/></svg></button>
+  <input id="uploadinput" type="file" accept="audio/*,.mp3,.wav,.flac,.m4a,.ogg" multiple hidden>
 </section>
+
+<!-- Your own clips. Cleared on every server start, so this is empty at the top of a run. -->
+<section class="clips" id="clips" hidden>
+  <div class="clips-head">
+    <h2>Your clips</h2>
+    <span class="dim" id="clipsnote"></span>
+  </div>
+  <div class="playrows" id="cliprows"></div>
+</section>
+
+<!-- Shown while a dragged file is over the window. -->
+<div class="dropveil" id="dropveil" hidden><div>Drop audio to embed it</div></div>
 
 <!-- Transport + spectrum analyzer on whatever is playing. The analyzer doubles as proof
      audio is actually reaching the output device, which is the thing that silently kills
@@ -51,9 +109,9 @@
 <section class="viz" id="viz" hidden>
   <canvas id="eq" height="56" aria-hidden="true"></canvas>
   <div class="transport">
-    <button id="back15" class="ghost" aria-label="Back 15 seconds" title="Back 15s (←)">−15s</button>
-    <button id="playpause" class="primary" aria-label="Play or pause" title="Play/pause (space)">Play</button>
-    <button id="fwd15" class="ghost" aria-label="Forward 15 seconds" title="Forward 15s (→)">+15s</button>
+    <button id="back15" class="ghost icon" aria-label="Back 15 seconds" title="Back 15s (←)"><svg class="i"><use href="#i-back15"/></svg></button>
+    <button id="playpause" class="primary icon" aria-label="Play or pause" title="Play/pause (space)"><svg class="i"><use href="#i-play"/></svg></button>
+    <button id="fwd15" class="ghost icon" aria-label="Forward 15 seconds" title="Forward 15s (→)"><svg class="i"><use href="#i-fwd15"/></svg></button>
     <input id="seek" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek">
     <span class="time" id="time">0:00 / 0:00</span>
   </div>
@@ -64,7 +122,17 @@
   <div class="chips" id="chips"></div>
   <div class="acts" id="acts">
     <input id="steer" placeholder="steer the composition (optional)" aria-label="Steer">
-    <button id="gen" class="primary">Compose <kbd>G</kbd></button>
+    <!-- Which generator composes. Options disable themselves when unavailable rather than
+         failing on click. -->
+    <div class="seg" id="backends" role="radiogroup" aria-label="Generator">
+      <button data-backend="local" role="radio" aria-checked="false" title="ACE-Step on this Mac (~2 min, offline)">Local</button>
+      <button data-backend="elevenlabs" role="radio" aria-checked="false" title="ElevenLabs Music (seconds, needs a key)">ElevenLabs</button>
+    </div>
+    <div class="seg" id="vocals" role="radiogroup" aria-label="Vocals">
+      <button data-vocals="0" role="radio" aria-checked="true" title="No singing">Instrumental</button>
+      <button data-vocals="1" role="radio" aria-checked="false" title="Sung vocals (ElevenLabs only)">Vocals</button>
+    </div>
+    <button id="gen" class="primary">Compose</button>
     <button id="clear" class="ghost">Clear</button>
   </div>
 
@@ -80,7 +148,16 @@
       <div class="progress-phase" id="progphase">starting…</div>
       <div class="progress-note dim" id="prognote"></div>
     </div>
+    <button id="abort" class="danger icon" aria-label="Stop generating" title="Stop generating (Esc)"><svg class="i"><use href="#i-stop"/></svg></button>
   </div>
+</section>
+
+<section class="result-panel" id="genpanel" hidden>
+  <div class="genhead">
+    <h2>Composed</h2>
+    <button id="closegen" class="ghost icon" aria-label="Close" title="Close"><svg class="i"><use href="#i-x"/></svg></button>
+  </div>
+  <div id="genbody"></div>
 </section>
 
 <main>
@@ -89,19 +166,13 @@
     <p>Search by <strong>sound</strong>, not tags.</p>
     <p class="dim">Then mark results <span class="pos">+</span> more like this,
        <span class="neg">−</span> less like this — and watch the list move.</p>
+    <p class="dim" style="font-size:.85em">Start with a <span class="pos">+</span>: a
+       <span class="neg">−</span> on its own has nothing to push against.</p>
     <p class="keys dim"><kbd>/</kbd> search · <kbd>↑↓</kbd> move · <kbd>space</kbd> play ·
        <kbd>←</kbd><kbd>→</kbd> ±15s · <kbd>+</kbd>/<kbd>−</kbd> mark · <kbd>G</kbd> compose ·
-       <kbd>T</kbd> theme</p>
+       <kbd>T</kbd> theme · <kbd>M</kbd> mode · <kbd>B</kbd> generator · <kbd>V</kbd> vocals</p>
   </div>
 </main>
-
-<section class="result-panel" id="genpanel" hidden>
-  <div class="genhead">
-    <h2>Composed</h2>
-    <button id="closegen" class="ghost">Close</button>
-  </div>
-  <div id="genbody"></div>
-</section>
 
 <div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
 <script src="/static/app.js"></script>
