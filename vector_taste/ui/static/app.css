@@ -381,6 +381,9 @@ button.danger kbd { color: inherit; border-color: currentColor; }
   white-space: nowrap;
 }
 .tag.new { color: var(--pos); border-color: var(--pos); }
+/* Your own audio in a library of CC0/CC-BY tracks. Violet, so it never reads as a rank
+   change (blue/orange) or a CTA (red). */
+.tag.yours { color: var(--violet); border-color: var(--violet); }
 .tag.up { color: var(--info); border-color: var(--info); }
 .tag.down { color: var(--neg); border-color: var(--neg); }
 .row.dropped { opacity: 0.4; border-style: dashed; }
@@ -391,6 +394,36 @@ button.danger kbd { color: inherit; border-color: currentColor; }
 .empty .pos { color: var(--pos); font-weight: 600; }
 .empty .neg { color: var(--neg); font-weight: 600; }
 .keys { margin-top: var(--s4) !important; font-size: 0.85em !important; }
+
+/* -------------------------------------------------------------------------- uploads */
+.clips {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s2);
+  margin-bottom: var(--s2);
+}
+.clips-head { display: flex; align-items: baseline; gap: var(--s2); margin-bottom: var(--s1); }
+.clips-head h2 { margin: 0; font-size: 1em; font-weight: 600; letter-spacing: -0.5px; }
+.playrow.clip { grid-template-columns: 2.2rem 1fr auto; }
+.playrow.clip .rowplay { padding: 6px 0; width: 2.2rem; }
+.clip-acts { display: flex; align-items: center; gap: var(--s1); }
+.clip-acts button { padding: 6px 12px; font-size: 0.85em; }
+
+/* Shown while a file is dragged over the window. Covers everything so there is no doubt
+   the page will take the drop. */
+.dropveil {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  border: 3px dashed var(--accent);
+  border-radius: var(--radius-lg);
+  font: 600 var(--fs-lg) var(--font-sans);
+  letter-spacing: -0.5px;
+  pointer-events: none;              /* never swallow the drop itself */
+}
 
 /* ------------------------------------------------------------------------ generated */
 .result-panel {

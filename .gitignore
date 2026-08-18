@@ -43,6 +43,10 @@ venv/
 # committed; these are not.
 generated/
 
+# User-supplied audio of unknown licence. *.mp3/*.wav/*.flac are already ignored above;
+# this is belt-and-braces on someone else's music. Purged on every server start anyway.
+uploads/
+
 # Taste profiles are written on every compose while exploring, so ignore them by
 # default and track ONLY the scripted demo set that `vt bake` and bank/ depend on.
 data/taste_*.json

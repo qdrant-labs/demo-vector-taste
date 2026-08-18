@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -26,6 +27,8 @@ from qdrant_client import models
 from .config import COLLECTION, DATA, get_client
 from .embed import centroid as _centroid
 from .search import EXACT, NOT_GENERATED, OVERFETCH, Hit, _to_hits, fetch_vectors, merge_filters
+
+log = logging.getLogger("vector_taste.taste")
 
 # best_score: a group scores as max(similarity to any positive), with negatives squared and
 # negated when they win. Chosen over average_vector because a single added negative visibly
@@ -81,6 +84,23 @@ class TasteProfile:
         return cls(d.get("positives", []), d.get("negatives", []), d.get("steer", ""))
 
 
+def live_ids(point_ids: list[str]) -> list[str]:
+    """Keep only the IDs that still exist in the collection.
+
+    Uploads are purged on every server start, so a taste profile saved during one session
+    can name points that are gone in the next. Qdrant errors on an unknown ID inside a
+    recommend query, which would turn a stale profile into a hard failure instead of a
+    slightly smaller taste.
+    """
+    if not point_ids:
+        return []
+    found = {str(r.id) for r in get_client().retrieve(COLLECTION, ids=point_ids)}
+    dropped = [p for p in point_ids if p not in found]
+    if dropped:
+        log.warning("dropping %d example(s) no longer in the collection", len(dropped))
+    return [p for p in point_ids if p in found]
+
+
 def recommend(
     profile: TasteProfile,
     limit: int = 10,
@@ -91,12 +111,16 @@ def recommend(
     if profile.is_empty():
         raise ValueError("taste profile has no examples")
 
+    positives, negatives = live_ids(profile.positives), live_ids(profile.negatives)
+    if not positives and not negatives:
+        raise ValueError("none of this profile's examples are in the collection any more")
+
     res = get_client().query_points_groups(
         collection_name=COLLECTION,
         query=models.RecommendQuery(
             recommend=models.RecommendInput(
-                positive=list(profile.positives),
-                negative=list(profile.negatives),
+                positive=positives,
+                negative=negatives,
                 strategy=strategy,
             )
         ),
@@ -169,10 +193,16 @@ def taste_centroid(profile: TasteProfile) -> np.ndarray:
     if not profile.positives:
         raise ValueError("cannot build a centroid without positive examples")
     vecs = fetch_vectors(profile.positives)
-    missing = [p for p in profile.positives if p not in vecs]
-    if missing:
-        raise ValueError(f"positives not found in collection: {missing}")
-    return _centroid(np.vstack([vecs[p] for p in profile.positives]))
+    # Missing positives are dropped, not fatal -- see live_ids(). Only an empty result is.
+    present = [p for p in profile.positives if p in vecs]
+    if len(present) != len(profile.positives):
+        log.warning(
+            "centroid built from %d of %d positives; the rest are no longer in the collection",
+            len(present), len(profile.positives),
+        )
+    if not present:
+        raise ValueError("none of this profile's positives are in the collection any more")
+    return _centroid(np.vstack([vecs[p] for p in present]))
 
 
 @dataclass
@@ -245,16 +275,24 @@ def percentile_against_centroid(
         other tracks' filler would inflate it.
       - Population EXCLUDES generated points, so the comparison is against human music and
         does not drift as generated tracks accumulate across rehearsal runs.
+      - Population also EXCLUDES uploads. Uploads ARE part of the searchable library -- they
+        show up in results and can be marked -- but letting them into this population would
+        make the closing number depend on whatever someone happened to drop in, and stop it
+        being comparable between runs. The number is "versus the fixed corpus", and the UI
+        says so.
       - The subject is scored the same way, so it is compared like with like.
     """
+    from .uploads import NOT_UPLOAD
+
     client = get_client()
-    total = client.count(COLLECTION, count_filter=NOT_GENERATED, exact=True).count
+    population = merge_filters(NOT_UPLOAD)
+    total = client.count(COLLECTION, count_filter=population, exact=True).count
     res = client.query_points(
         collection_name=COLLECTION,
         query=centroid_vec.tolist(),
         using="audio",
         limit=max(total, 1),
-        query_filter=NOT_GENERATED,
+        query_filter=population,
         search_params=EXACT,
         with_payload=["segment_id"],
         with_vectors=False,

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -19,6 +19,9 @@ from ..search import Hit, by_text, format_table  # noqa: F401
 STATIC = Path(__file__).parent / "static"
 
 app = FastAPI(title="Vector Taste", docs_url=None, redoc_url=None)
+
+# Module-level so it is not a call in a default argument (ruff B008).
+_UPLOAD_FILE = File(...)
 
 
 def _hit_json(h: Hit) -> dict:
@@ -33,6 +36,8 @@ def _hit_json(h: Hit) -> dict:
         "key": p.get("key"),
         "tags": p.get("tags") or [],
         "license": p.get("license", ""),
+        # Drives the YOURS badge. Uploads are ordinary library members otherwise.
+        "is_upload": bool(p.get("is_upload")),
         "start_sec": h.start_sec,
         "audio_url": f"/audio/{h.segment_id}",
     }
@@ -73,9 +78,21 @@ def _startup() -> None:
     it, so paying that during startup turns the first compose from ~250s (150 of them
     featureless) into ~99s with a real moving ring.
 
+    Also clears any audio left over from a previous session, so every run starts on the
+    fixed corpus rather than on whatever the last person dropped in.
+
     Skipped for GEN_BACKEND=bank: the stage config never generates, so holding ~4GB would
     be pure cost. Never blocks -- search must work while this runs.
     """
+    from ..uploads import purge
+
+    try:
+        purge()
+    except Exception as exc:  # noqa: BLE001 - a purge failure must not stop the server
+        import logging
+
+        logging.getLogger("vector_taste.ui").warning("upload purge failed: %s", exc)
+
     if GEN_BACKEND == "bank":
         return
     from ..worker import prewarm
@@ -128,6 +145,45 @@ def progress():
     snap = PROGRESS.snapshot()
     snap["worker"] = worker_state()
     return snap
+
+
+@app.post("/api/upload")
+async def upload(file: UploadFile = _UPLOAD_FILE):
+    """Embed a user's audio into the same collection the corpus lives in.
+
+    Synchronous: a few seconds of CLAP, and the answer is worth waiting for. The file's own
+    name never reaches the filesystem -- see uploads.save().
+    """
+    from ..uploads import UploadError, ingest, save
+
+    data = await file.read()
+    try:
+        path, track_id = save(data, file.filename or "")
+    except UploadError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    try:
+        return ingest(path, track_id, Path(file.filename or "upload").name)
+    except UploadError as exc:
+        path.unlink(missing_ok=True)          # never leave audio we could not embed
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        path.unlink(missing_ok=True)
+        raise HTTPException(500, f"could not embed that file: {exc}") from exc
+
+
+@app.get("/api/uploads")
+def uploads_list():
+    from ..uploads import listing
+
+    return {"uploads": listing()}
+
+
+@app.delete("/api/uploads/{track_id}")
+def uploads_delete(track_id: str):
+    from ..uploads import delete
+
+    return {"deleted": delete(track_id)}
 
 
 @app.post("/api/search")

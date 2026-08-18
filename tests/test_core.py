@@ -599,3 +599,81 @@ def test_the_baseline_excludes_the_whole_track_you_marked_not_just_that_chunk():
     by_segment = [h for h in results if h.segment_id not in {"trk:0"}]
     assert by_segment[0].segment_id == "trk2:0"       # the fix: a genuinely different track
     assert callable(_segments_of)
+
+
+# --------------------------------------------------------------------------- uploads
+def test_upload_validation_rejects_what_it_should():
+    import pytest
+
+    from vector_taste.uploads import MAX_BYTES, UploadError, validate
+
+    assert validate("song.mp3", 1000) == ".mp3"
+    assert validate("SONG.WAV", 1000) == ".wav"          # case-insensitive
+    with pytest.raises(UploadError, match="not audio"):
+        validate("resume.pdf", 1000)
+    with pytest.raises(UploadError, match="not audio"):
+        validate("noextension", 1000)
+    with pytest.raises(UploadError, match="limit"):
+        validate("song.mp3", MAX_BYTES + 1)
+    with pytest.raises(UploadError, match="empty"):
+        validate("song.mp3", 0)
+
+
+def test_uploaded_filenames_never_reach_the_filesystem(tmp_path, monkeypatch):
+    """A user-supplied name is display text, never a path. Storing under a generated name
+    closes path traversal without needing to sanitise anything."""
+    from vector_taste import uploads
+
+    monkeypatch.setattr(uploads, "UPLOADS", tmp_path / "uploads")
+    path, track_id = uploads.save(b"not really audio, but bytes", "../../../etc/passwd.wav")
+
+    assert path.parent == tmp_path / "uploads"           # stayed inside the upload dir
+    assert path.name == f"{track_id}.wav"                # nothing of the original name
+    assert ".." not in str(path)
+    assert not (tmp_path / "etc").exists()
+
+
+def test_hosted_generation_never_receives_user_audio():
+    """A hosted backend UPLOADS the style reference to a third party. An upload is somebody
+    else's file of unknown provenance, so those backends skip past it to a corpus track.
+    Local keeps the top hit -- conditioning on your own audio never leaves the machine."""
+    from vector_taste.cli import _reference_hit
+
+    class _H:
+        def __init__(self, upload, name):
+            self.payload = {"is_upload": upload, "title": name}
+
+    hits = [_H(True, "mine.wav"), _H(False, "corpus track")]
+
+    assert _reference_hit(hits, "elevenlabs").payload["title"] == "corpus track"
+    assert _reference_hit(hits, "local").payload["title"] == "mine.wav"
+    assert _reference_hit(hits, "modal").payload["title"] == "mine.wav"
+    # Nothing but uploads: send no reference at all rather than send theirs.
+    assert _reference_hit([_H(True, "mine.wav")], "elevenlabs") is None
+
+
+def test_upload_payload_cannot_claim_a_licence_it_does_not_have():
+    """The row subtitle renders `license`. Printing CC-BY over a stranger's file would be a
+    false claim in a repo whose argument is that its corpus is legally clean."""
+    import inspect
+
+    from vector_taste import uploads
+
+    src = inspect.getsource(uploads.ingest)
+    assert '"license": "your upload"' in src
+    assert '"source_url": ""' in src        # so ATTRIBUTIONS.md can never pick it up
+    assert '"is_upload": True' in src
+
+
+def test_uploads_are_excluded_from_the_scoring_population_but_not_from_search():
+    """Uploads are part of the searchable library by design. The closing percentile is a
+    different question: letting them in would make the headline depend on whatever someone
+    dropped in, and stop it being comparable between runs."""
+    import inspect
+
+    from vector_taste import search, taste
+
+    assert "NOT_UPLOAD" in inspect.getsource(taste.percentile_against_centroid)
+    # Retrieval deliberately filters only generated points.
+    assert "is_upload" not in inspect.getsource(search.merge_filters)
+    assert "is_upload" not in inspect.getsource(search._query)

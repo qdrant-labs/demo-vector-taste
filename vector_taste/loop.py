@@ -63,7 +63,7 @@ class LoopResult:
                 "",
                 f"  The generated track lands at the {ordinal(self.percentile)} percentile.",
                 f"  Closer to your taste centroid than {self.percentile:.0f}% of the "
-                f"{self.population} segments in the library.",
+                f"{self.population} corpus segments (uploads excluded).",
                 "",
                 f"    generated   cosine {self.cosine:+.4f}   percentile {self.percentile:5.1f}",
                 f"    best human  cosine {self.baseline_cosine:+.4f}   "

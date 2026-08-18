@@ -190,6 +190,12 @@ def bank_add(
 # produce wordless syllables and misrepresent what it does.
 VOCALS_BACKENDS = frozenset({"elevenlabs"})
 
+# Backends that transmit the style-reference CLIP to a third party. Distinct from
+# VOCALS_BACKENDS on purpose even though they hold the same value today: one is about what a
+# backend can produce, this is about whose disk the audio ends up on. `modal` is your own
+# deployment and `replicate` never receives a reference at all.
+AUDIO_LEAVES_MACHINE = frozenset({"elevenlabs"})
+
 
 def available_backends() -> dict[str, bool]:
     """Which backends can run, so the UI can disable rather than fail on click."""

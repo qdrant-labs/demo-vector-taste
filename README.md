@@ -85,9 +85,46 @@ uv run vt prompt --profile <hash>     # retrieved payload -> ACE-Step params
 uv run vt generate --profile <hash>   # compose
 uv run vt loop --profile <hash>       # re-embed and score against your taste
 
+uv run vt upload my-track.mp3         # embed your own audio, print its neighbors
+uv run vt reset --uploads             # drop every upload
+
 uv run vt timings                     # wall-clock per stage
 uv run vt preflight                   # pre-demo checklist
 ```
+
+---
+
+## Bring your own music
+
+Drop an audio file anywhere on the page (or press **Upload**). It is chunked into the same
+10-second windows as the corpus, embedded with the same CLAP model, and upserted into the
+same Qdrant collection — then **Find similar** returns the tracks nearest to it.
+
+Because an upload is an ordinary point carrying `is_generated: false`, it needs no special
+handling in retrieval: it is searchable, markable with +/−, and usable as a recommendation
+example exactly like a corpus track. A 3½-minute file becomes ~7 segments / 21 chunk points
+and appears as one clip; **Find similar** queries with all of them at once, so the match is
+made on the strongest moment of the track rather than on its intro.
+
+`.mp3 .wav .flac .m4a .ogg`, up to 30 MB, truncated at 5 minutes.
+
+**Four things this deliberately does with somebody else's music:**
+
+- **Uploads are cleared on every server start**, so a run always begins on the fixed corpus.
+  `uploads/` is gitignored on top of the global `*.mp3`/`*.wav` rules.
+- **The licence label reads `your upload`, never a CC string.** The result row renders that
+  field, and printing `CC-BY` over a stranger's file would be a false claim in a repo whose
+  argument is that its corpus is legally clean. `ATTRIBUTIONS.md` cannot pick uploads up.
+- **Your audio is never sent to a hosted generator.** A hosted backend uploads its style
+  reference to a third party, so on those backends the reference skips past uploads to the
+  first corpus track. Local ACE-Step still conditions on your own clip — that never leaves
+  the machine.
+- **The closing percentile still counts the corpus, not your uploads.** Uploads are part of
+  the searchable library, but letting them into the scoring population would make the
+  headline number depend on whatever was dropped in and stop it being comparable run to run.
+
+The filename you upload is display text only — files are stored under a generated name, so a
+filename like `../../etc/passwd.mp3` is inert.
 
 ---
 

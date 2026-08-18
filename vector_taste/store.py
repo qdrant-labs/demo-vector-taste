@@ -26,6 +26,7 @@ INDEXES: dict[str, models.PayloadSchemaType] = {
     "tags": models.PayloadSchemaType.KEYWORD,
     "bpm": models.PayloadSchemaType.INTEGER,
     "is_generated": models.PayloadSchemaType.BOOL,  # excludes generated from retrieval
+    "is_upload": models.PayloadSchemaType.BOOL,  # user audio: purged on start, not scored
 }
 
 # Named vectors. `lyrics` is deliberately absent in v1: it would be a third named vector

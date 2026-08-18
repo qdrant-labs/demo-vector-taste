@@ -13,6 +13,7 @@ const state = {
   loop: null,       // its /api/loop scoring
   prevOrder: null,  // segment_ids of the list on screen BEFORE the current one
   moves: null,      // what the last gesture did to the ranking; drives the NEW/UP/DOWN tags
+  clips: [],        // your uploads, cleared server-side on every start
 };
 
 /* ------------------------------------------------------------------ audio + equalizer */
@@ -333,7 +334,8 @@ function rowHtml(h, i, dropped) {
             title="${isPlaying ? "Pause" : "Play"}">${isPlaying ? "❚❚" : "▶"}</button>
     <div class="rank">${dropped ? "—" : i + 1}</div>
     <div class="meta">
-      <div class="name">${esc(h.artist)} — ${esc(h.title)} ${tagFor(h)}</div>
+      <div class="name">${esc(h.artist)} — ${esc(h.title)}
+        ${h.is_upload ? '<span class="tag yours">YOURS</span>' : ""} ${tagFor(h)}</div>
       <div class="sub">${esc(sub)}</div>
     </div>
     <div class="score">${dropped ? "" : h.score.toFixed(4)}</div>
@@ -356,11 +358,19 @@ function render() {
       state.diff.dropped.map((h) => rowHtml(h, -1, true)).join(""));
   }
 
-  const chips = [...state.pos.values()].map((h) => chip(h, "pos"))
-    .concat([...state.neg.values()].map((h) => chip(h, "neg"))).join("");
+  const bySegment = (map, kind) => {
+    const seen = new Set();
+    return [...map.values()].filter((h) => {
+      if (seen.has(h.segment_id)) return false;
+      seen.add(h.segment_id);
+      return true;
+    }).map((h) => chip(h, kind));
+  };
+  const chips = bySegment(state.pos, "pos").concat(bySegment(state.neg, "neg")).join("");
   $("#chips").innerHTML = chips || '<span class="dim">no examples marked yet</span>';
   $("#tastebar").hidden = state.pos.size === 0 && state.neg.size === 0;
   renderGenPanel();
+  renderClips();
 }
 
 const chip = (h, kind) => `<span class="chip ${kind}">
@@ -383,6 +393,129 @@ function toast(msg, ms = 3200) {
   t.textContent = msg; t.hidden = false;
   clearTimeout(t._t); t._t = setTimeout(() => (t.hidden = true), ms);
 }
+
+/* --------------------------------------------------------------------------- uploads */
+/* Your own audio, embedded with the same model as the corpus and upserted into the same
+   collection -- so an upload is searchable, markable and recommendable with no special
+   cases anywhere in retrieval. The server clears these on every start. */
+
+function renderClips() {
+  const box = $("#clips");
+  box.hidden = state.clips.length === 0;
+  $("#cliprows").innerHTML = state.clips.map((c) => {
+    const on = state.playing === c.audio_url && !audioEl.paused;
+    return `
+    <div class="playrow clip${on ? " playing" : ""}">
+      <button class="rowplay" data-clip-play="${esc(c.audio_url)}"
+              aria-label="${on ? "Pause" : "Play"} ${esc(c.title)}">${on ? "❚❚" : "▶"}</button>
+      <span class="playrow-meta">
+        <span class="playrow-kind">${esc(c.title)}</span>
+        <span class="playrow-label">${c.points} chunks · ${c.bpm ?? "—"} BPM · ${esc(c.key ?? "—")}</span>
+      </span>
+      <span class="clip-acts">
+        <button data-clip-similar="${esc(c.track_id)}" class="ghost">Find similar</button>
+        <button data-clip-remove="${esc(c.track_id)}" class="ghost" aria-label="Remove">×</button>
+      </span>
+    </div>`;
+  }).join("");
+}
+
+async function loadClips() {
+  try {
+    state.clips = (await fetch("/api/uploads").then((r) => r.json())).uploads || [];
+  } catch { state.clips = []; }
+  renderClips();
+}
+
+/* Every chunk of the clip becomes a positive, so "find similar" matches on the strongest
+   moment of the track rather than on whatever its first ten seconds happen to be. Qdrant
+   excludes the positives themselves from the results, so the clip never echoes back. */
+function findSimilar(trackId) {
+  const c = state.clips.find((x) => x.track_id === trackId);
+  if (!c) return;
+  state.pos.clear(); state.neg.clear();
+  for (const pid of c.point_ids) {
+    state.pos.set(pid, { point_id: pid, segment_id: c.segment_id, artist: "You",
+                         title: c.title, audio_url: c.audio_url });
+  }
+  render();
+  refreshTaste();
+}
+
+async function uploadFiles(files) {
+  const list = [...files].filter((f) => f.size);
+  if (!list.length) return;
+  const btn = $("#uploadbtn");
+  btn.disabled = true;
+  const was = btn.textContent;
+  let last = null;
+  for (const f of list) {
+    btn.textContent = `embedding ${f.name.slice(0, 18)}…`;
+    const body = new FormData();
+    body.append("file", f);
+    try {
+      const r = await fetch("/api/upload", { method: "POST", body });
+      const j = await r.json();
+      if (!r.ok) { toast(`${f.name}: ${j.detail || "upload failed"}`, 6000); continue; }
+      last = j;
+      toast(`${j.title} · ${j.points} chunks embedded`
+            + (j.truncated ? " (truncated to 5 min)" : ""), 4000);
+    } catch (e) { toast(`${f.name}: ${e.message}`, 6000); }
+  }
+  btn.disabled = false; btn.textContent = was;
+  await loadClips();
+  // Answer the question the upload was asking, without making them click again.
+  if (last) findSimilar(last.track_id);
+}
+
+$("#uploadbtn").onclick = () => $("#uploadinput").click();
+$("#uploadinput").addEventListener("change", (e) => {
+  uploadFiles(e.target.files);
+  e.target.value = "";                       // so re-picking the same file still fires
+});
+
+$("#clips").addEventListener("click", (e) => {
+  const play = e.target.closest("[data-clip-play]");
+  if (play) { play_(play.dataset.clipPlay); return; }
+  const sim = e.target.closest("[data-clip-similar]");
+  if (sim) { findSimilar(sim.dataset.clipSimilar); return; }
+  const rm = e.target.closest("[data-clip-remove]");
+  if (rm) removeClip(rm.dataset.clipRemove);
+});
+
+function play_(url) {
+  const c = state.clips.find((x) => x.audio_url === url);
+  play(url, c ? c.title : "your clip");
+}
+
+async function removeClip(trackId) {
+  const c = state.clips.find((x) => x.track_id === trackId);
+  try {
+    await fetch(`/api/uploads/${encodeURIComponent(trackId)}`, { method: "DELETE" });
+  } catch (e) { toast("could not remove: " + e.message); return; }
+  // Its points are gone, so any mark pointing at them has to go too or the next query 400s.
+  if (c) for (const pid of c.point_ids) { state.pos.delete(pid); state.neg.delete(pid); }
+  await loadClips();
+  render();
+  if (state.pos.size || state.neg.size) refreshTaste();
+}
+
+/* Drag anywhere on the window. dragleave fires constantly while moving over children, so
+   the veil is driven by a counter rather than by the last event seen. */
+let dragDepth = 0;
+window.addEventListener("dragover", (e) => e.preventDefault());
+window.addEventListener("dragenter", (e) => {
+  e.preventDefault();
+  if (++dragDepth === 1) $("#dropveil").hidden = false;
+});
+window.addEventListener("dragleave", () => {
+  if (--dragDepth <= 0) { dragDepth = 0; $("#dropveil").hidden = true; }
+});
+window.addEventListener("drop", (e) => {
+  e.preventDefault();
+  dragDepth = 0; $("#dropveil").hidden = true;
+  if (e.dataTransfer && e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files);
+});
 
 /* ------------------------------------------------------------------------------- api */
 async function api(path, body) {
@@ -563,7 +696,7 @@ function renderGenPanel() {
       ${banner}
       ${pct !== null ? `
       <div class="bigstat">${ordinal(pct).replace(/([a-z]+)$/, '<span class="unit">$1</span>')}<span class="unit"> percentile</span></div>
-      <div class="dim">closer to your taste than ${pct.toFixed(0)}% of ${loop.population} segments</div>
+      <div class="dim">closer to your taste than ${pct.toFixed(0)}% of ${loop.population} corpus segments<span class="dim"> — your uploads are not counted</span></div>
       <div class="bar"><i style="width:${Math.max(1, pct)}%"></i></div>
       <div class="bar baseline"><i style="width:${Math.max(1, loop.baseline_percentile)}%"></i></div>
       <div class="dim" style="font-size:.82em">
@@ -647,8 +780,11 @@ $("#results").addEventListener("click", (e) => {
 $("#chips").addEventListener("click", (e) => {
   const b = e.target.closest("[data-unchip]");
   if (!b) return;
-  state.pos.delete(b.dataset.unchip); state.neg.delete(b.dataset.unchip);
-  render(); refreshTaste();
+  const hit = state.pos.get(b.dataset.unchip) || state.neg.get(b.dataset.unchip);
+  if (hit) { unmarkSegment(state.pos, hit); unmarkSegment(state.neg, hit); }
+  else { state.pos.delete(b.dataset.unchip); state.neg.delete(b.dataset.unchip); }
+  render();
+  if (state.pos.size || state.neg.size) refreshTaste(); else doSearch();
 });
 
 /* ------------------------------------------------------------------------------ theme */

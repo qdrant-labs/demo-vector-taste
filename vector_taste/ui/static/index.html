@@ -43,7 +43,22 @@
   <input id="q" type="search" placeholder="Describe a sound —  &ldquo;dreamy lo-fi with vinyl crackle&rdquo;"
          autocomplete="off" aria-label="Search by sound">
   <button id="go" class="primary">Search</button>
+  <!-- The whole page is also a drop target; this is the discoverable route to the same thing. -->
+  <button id="uploadbtn" class="ghost" title="Add your own audio and find its neighbors">Upload</button>
+  <input id="uploadinput" type="file" accept="audio/*,.mp3,.wav,.flac,.m4a,.ogg" multiple hidden>
 </section>
+
+<!-- Your own clips. Cleared on every server start, so this is empty at the top of a run. -->
+<section class="clips" id="clips" hidden>
+  <div class="clips-head">
+    <h2>Your clips</h2>
+    <span class="dim" id="clipsnote"></span>
+  </div>
+  <div class="playrows" id="cliprows"></div>
+</section>
+
+<!-- Shown while a dragged file is over the window. -->
+<div class="dropveil" id="dropveil" hidden><div>Drop audio to embed it</div></div>
 
 <!-- Transport + spectrum analyzer on whatever is playing. The analyzer doubles as proof
      audio is actually reaching the output device, which is the thing that silently kills

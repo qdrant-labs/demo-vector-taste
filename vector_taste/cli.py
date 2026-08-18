@@ -184,7 +184,7 @@ def cmd_generate(args):
     # could condition it on the intro that did not match.
     ref = None
     if hits and not args.no_reference:
-        ref = _reference_clip(hits[0])
+        ref = _reference_clip(_reference_hit(hits, args.backend))
 
     from .taste import taste_centroid
 
@@ -212,6 +212,25 @@ def _resolve_seed(args, profile_hash: str) -> int:
     if getattr(args, "reproducible", False):
         return seed_from_hash(profile_hash)
     return fresh_seed()
+
+
+def _reference_hit(hits, backend: str | None):
+    """Which hit conditions the generation.
+
+    Normally the top one. But a hosted backend UPLOADS this clip to a third party, and an
+    upload is somebody's own file of unknown provenance -- so on those backends we skip past
+    uploads to the first corpus track. Local generation keeps the top hit whatever it is:
+    conditioning on your own upload is a good result and never leaves this machine.
+    """
+    from .generate import AUDIO_LEAVES_MACHINE
+
+    if (backend or GEN_BACKEND) not in AUDIO_LEAVES_MACHINE:
+        return hits[0]
+    for h in hits:
+        if not h.payload.get("is_upload"):
+            return h
+    _p("  note       every hit is an upload; generating without a style reference")
+    return None
 
 
 def _reference_clip(hit) -> Path | None:
@@ -315,12 +334,45 @@ def cmd_info(args):
     return 0
 
 
+def cmd_upload(args):
+    """Embed a local audio file into the collection, same as dropping it on the UI."""
+    from pathlib import Path as _Path
+
+    from .uploads import UploadError, ingest, save
+
+    src = _Path(args.path)
+    if not src.is_file():
+        _p(f"error: no such file {src}")
+        return 2
+    try:
+        path, track_id = save(src.read_bytes(), src.name)
+        clip = ingest(path, track_id, src.name)
+    except UploadError as exc:
+        _p(f"error: {exc}")
+        return 2
+    _p("")
+    _p(f"  track      {clip['title']}")
+    _p(f"  points     {clip['points']} across {clip['segments']} segment(s)")
+    _p(f"  duration   {clip['seconds']}s{'  (truncated)' if clip['truncated'] else ''}")
+    _p(f"  bpm / key  {clip['bpm'] or '-'} · {clip['key'] or '-'}")
+    _p("")
+    from .search import format_table
+    from .taste import TasteProfile, recommend
+
+    _p(format_table(recommend(TasteProfile(positives=clip["point_ids"]), limit=args.limit),
+                    "nearest in the library:"))
+    return 0
+
+
 def cmd_reset(args):
     from .store import delete_generated, ensure_collection
+    from .uploads import purge as purge_uploads
 
     if args.all:
         ensure_collection(recreate=True)
         _p("  collection recreated (empty)")
+    elif args.uploads:
+        _p(f"  purged {purge_uploads()} upload points")
     else:
         _p(f"  purged {delete_generated()} generated points")
     return 0
@@ -442,8 +494,14 @@ def main(argv=None) -> int:
     sub.add_parser("timings", help="per-stage wall clock").set_defaults(func=cmd_timings)
     sub.add_parser("info", help="collection status").set_defaults(func=cmd_info)
 
+    up = sub.add_parser("upload", help="embed your own audio file and show its neighbors")
+    up.add_argument("path")
+    up.add_argument("--limit", type=int, default=10)
+    up.set_defaults(func=cmd_upload)
+
     r = sub.add_parser("reset", help="purge generated points (or everything)")
     r.add_argument("--all", action="store_true")
+    r.add_argument("--uploads", action="store_true", help="purge user uploads only")
     r.set_defaults(func=cmd_reset)
 
     pf = sub.add_parser("preflight", help="pre-demo checklist")
