@@ -50,11 +50,24 @@ re-running it is safe.
 either way. If you'd rather use Compose:
 
 ```bash
-docker compose up -d
+docker compose up -d qdrant
 ```
 
 Both give you Qdrant on `localhost:6333` with a persistent volume, pinned to `v1.19.0`. Nothing else
 in the stack can tell the difference.
+
+### Running the whole demo in Docker
+
+Once `bootstrap` has fetched and ingested the corpus, the UI can run in a container too:
+
+```bash
+docker compose up -d              # Qdrant + the app on http://localhost:8000
+```
+
+The image holds code and dependencies only. `audio/`, `raw/`, `data/`, `generated/` and your
+Hugging Face cache are mounted from the host, so nothing is downloaded twice. Torch is the CPU
+build, which skips ~6 GB of CUDA libraries a Mac can't use. Search and the ElevenLabs backend
+work; `GEN_BACKEND=local` does not, because ACE-Step on MLX needs the host's GPU.
 
 ### Using your own Qdrant Cloud cluster
 
