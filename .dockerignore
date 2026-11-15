@@ -1,0 +1,16 @@
+.git
+.env
+.env.local
+.venv
+audio
+raw
+models
+cache
+generated
+uploads
+qdrant_storage*
+data/embeddings.npy
+**/__pycache__
+.pytest_cache
+.ruff_cache
+timings.jsonl
