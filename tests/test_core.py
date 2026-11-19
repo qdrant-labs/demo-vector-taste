@@ -788,7 +788,7 @@ def test_the_ui_shell_and_assets_are_not_heuristically_cacheable():
         assert again.status_code == 304 and not again.content
 
 
-def test_assets_are_cache_busted_and_the_page_can_detect_its_own_staleness():
+def test_assets_are_cache_busted_and_the_page_can_detect_its_own_staleness(monkeypatch):
     """no-store fixes tabs opened from now on, but a cache entry poisoned BEFORE it shipped
     has no validators, so a browser can keep reusing it and its old app.js through ordinary
     reloads. A changing query string is a URL the cache has never seen, which is the only
@@ -799,6 +799,8 @@ def test_assets_are_cache_busted_and_the_page_can_detect_its_own_staleness():
 
     from vector_taste.ui.app import app, build_id
 
+    # CI has no Qdrant; without this /api/status 503s and carries no build stamp.
+    monkeypatch.setattr("vector_taste.store.collection_info", lambda: {"points": 0})
     v = build_id()
     with TestClient(app) as c:
         html = c.get("/").text
